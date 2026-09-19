@@ -1,0 +1,11 @@
+.venv/
+.git/
+.claude/
+tables/
+tests/
+k8s/
+docs/
+__pycache__/
+*.pyc
+.env
+claude_resume.sh

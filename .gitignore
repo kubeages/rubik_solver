@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+.env
+.env.local
+tables/
+.claude/
+claude_resume.sh
+
+# Private/local config — never commit real hostnames, IPs, or credentials
+*.local.yaml
+*.local.yml

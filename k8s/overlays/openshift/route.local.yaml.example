@@ -1,0 +1,28 @@
+# Copy to route.local.yaml and set your real host. route.local.yaml is gitignored.
+#
+# Apply after the main kustomize deploy:
+#   oc apply -k k8s/overlays/openshift/
+#   oc apply -f k8s/overlays/openshift/route.local.yaml
+#
+# Or patch in place:
+#   oc patch route/rubik-solver --type=merge \
+#     -p '{"spec":{"host":"rubik-solver.your-cluster.example.com"}}'
+#
+# The camera only works over HTTPS, so keep the edge TLS termination.
+
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: rubik-solver
+  annotations:
+    haproxy.router.openshift.io/timeout: "90s"
+spec:
+  host: rubik-solver.your-cluster.example.com
+  to:
+    kind: Service
+    name: rubik-solver
+  port:
+    targetPort: 8080
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

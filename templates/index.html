@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rubik con grafos</title>
+  <meta name="description" content="Resuelve tu cubo de Rubik paso a paso y aprende la teoría de grafos que hay detrás.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'><rect x='1' y='1' width='8.5' height='8.5' rx='2' fill='%23c8252c'/><rect x='10.75' y='1' width='8.5' height='8.5' rx='2' fill='%23f7c928'/><rect x='20.5' y='1' width='8.5' height='8.5' rx='2' fill='%231f8a4c'/><rect x='1' y='10.75' width='8.5' height='8.5' rx='2' fill='%231f5fbf'/><rect x='10.75' y='10.75' width='8.5' height='8.5' rx='2' fill='%23f2f2ec'/><rect x='20.5' y='10.75' width='8.5' height='8.5' rx='2' fill='%23f2842a'/><rect x='1' y='20.5' width='8.5' height='8.5' rx='2' fill='%23f7c928'/><rect x='10.75' y='20.5' width='8.5' height='8.5' rx='2' fill='%231f8a4c'/><rect x='20.5' y='20.5' width='8.5' height='8.5' rx='2' fill='%23c8252c'/></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <script type="importmap">
+  {"imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+  }}
+  </script>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/" aria-label="Inicio">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <span>Rubik <em>con grafos</em></span>
+  </a>
+  <nav class="steps-nav" aria-label="Progreso">
+    <span data-screen-link="home" class="active">1 · Empezar</span>
+    <span data-screen-link="capture">2 · Escanear</span>
+    <span data-screen-link="review">3 · Revisar</span>
+    <span data-screen-link="solve">4 · Resolver</span>
+  </nav>
+</header>
+
+<main>
+  <!-- 1 · Inicio -->
+  <section class="screen active" id="screen-home">
+    <div class="hero">
+      <div class="hero-text">
+        <h1>Resuelve tu cubo siguiendo un camino en un grafo</h1>
+        <p>Cada posición del cubo es un vértice y cada giro es una arista. Resolverlo es encontrar
+          un camino hasta el vértice «resuelto». Te guiamos paso a paso: tú haces el giro, lo
+          confirmas, y te enseñamos qué está pasando en el grafo.</p>
+        <div class="hero-actions">
+          <button class="btn primary" data-action="scan-camera">📷 Escanear con la cámara</button>
+          <button class="btn" data-action="scan-upload">🖼️ Subir fotos</button>
+          <button class="btn ghost" data-action="manual">✏️ Pintar a mano</button>
+          <button class="btn ghost" data-action="demo">🎲 Probar con un cubo mezclado</button>
+        </div>
+        <p class="hint">Con dos fotos basta: cada una muestra tres caras del cubo, apuntando una esquina hacia la cámara.</p>
+      </div>
+      <div class="hero-graph">
+        <svg id="hero-sticker-graph" viewBox="-100 -100 200 200" role="img" aria-label="Grafo de pegatinas del cubo"></svg>
+      </div>
+    </div>
+    <div class="explainer">
+      <article>
+        <h3>El grafo de pegatinas</h3>
+        <p>Los 54 adhesivos son vértices. Cada giro de cara los mueve por un anillo de 12 adhesivos
+          y rota los 8 de la propia cara: son los ciclos de una permutación.</p>
+      </article>
+      <article>
+        <h3>El grafo de estados</h3>
+        <p>Unos 43 trillones de vértices, 18 aristas por vértice y diámetro 20 (el «número de Dios»).
+          Demasiado grande para recorrerlo entero, así que lo partimos en fases.</p>
+      </article>
+      <article>
+        <h3>Búsqueda de caminos</h3>
+        <p>En cada fase usamos BFS para conocer la distancia exacta a la meta, o IDA* con cotas
+          inferiores en el modo rápido. Cada paso que confirmas es una arista que te acerca.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- 2 · Captura -->
+  <section class="screen" id="screen-capture">
+    <div class="capture-layout">
+      <div class="capture-stage">
+        <div class="capture-head">
+          <h2 id="capture-title">Foto 1 de 2</h2>
+          <p id="capture-instructions"></p>
+        </div>
+        <div class="capture-canvas-wrap" id="capture-wrap">
+          <video id="capture-video" playsinline muted></video>
+          <canvas id="capture-canvas"></canvas>
+          <svg id="capture-overlay"></svg>
+        </div>
+        <div class="capture-actions">
+          <button class="btn primary" id="btn-shoot">Capturar</button>
+          <label class="btn" id="btn-upload-label">Subir foto<input type="file" id="file-input" accept="image/*" hidden></label>
+          <button class="btn ghost" id="btn-retake" hidden>Repetir</button>
+          <button class="btn primary" id="btn-use" hidden>Usar esta foto ›</button>
+          <button class="btn ghost" id="btn-capture-cancel">Cancelar</button>
+        </div>
+        <p class="hint" id="capture-hint">Arrastra los 7 puntos azules hasta las esquinas del cubo si no encajan.</p>
+      </div>
+      <aside class="capture-guide">
+        <h3>¿Qué caras deben verse?</h3>
+        <svg id="capture-guide-svg" viewBox="-60 -60 120 120"></svg>
+        <ol class="guide-list">
+          <li><b>Foto 1:</b> la esquina de arriba-delante-derecha apunta a la cámara. Se ven arriba, delante y derecha.</li>
+          <li><b>Foto 2:</b> dale la vuelta al cubo para que ahora apunte a la cámara la esquina opuesta (la de abajo-atrás-izquierda). Se ven las tres caras que faltaban.</li>
+        </ol>
+        <p class="hint">Consejo: luz uniforme, sin reflejos, y el cubo ocupando casi todo el hexágono.</p>
+      </aside>
+    </div>
+  </section>
+
+  <!-- 3 · Revisar -->
+  <section class="screen" id="screen-review">
+    <div class="review-layout">
+      <div>
+        <h2>Revisa los colores</h2>
+        <p class="lead">Pulsa una pegatina para cambiar su color. Los centros definen qué color es cada cara.</p>
+        <div class="palette" id="palette"></div>
+        <div class="net" id="net"></div>
+        <div class="review-status" id="review-status"></div>
+        <div class="review-actions">
+          <button class="btn ghost" id="btn-rotate-view2" hidden>La foto 2 está mal girada: probar otra orientación</button>
+          <button class="btn ghost" id="btn-rescan">Volver a escanear</button>
+        </div>
+      </div>
+      <aside class="mode-card">
+        <h3>¿Cómo quieres resolverlo?</h3>
+        <label class="mode-option">
+          <input type="radio" name="mode" value="learn" checked>
+          <span><b>Aprender (método por capas)</b><br>
+          7 fases, cada una con su propio grafo pequeño. Unos 100-140 giros, agrupados en algoritmos fáciles de recordar.</span>
+        </label>
+        <label class="mode-option">
+          <input type="radio" name="mode" value="fast">
+          <span><b>Rápido (Kociemba, dos fases)</b><br>
+          Unos 20-22 giros. Busca en el grafo completo con IDA*.</span>
+        </label>
+        <div class="base-picker" id="base-picker">
+          <span>Color de la primera capa (abajo):</span>
+          <div id="base-colors"></div>
+        </div>
+        <button class="btn primary big" id="btn-solve" disabled>Calcular el camino ›</button>
+      </aside>
+    </div>
+  </section>
+
+  <!-- 4 · Resolver -->
+  <section class="screen" id="screen-solve">
+    <div class="solve-layout">
+      <div class="solve-left">
+        <div class="cube3d-wrap">
+          <div id="cube3d" aria-label="Cubo 3D"></div>
+          <div class="cube3d-tools">
+            <button class="icon-btn" id="btn-replay" title="Repetir la animación">↻</button>
+            <button class="icon-btn" id="btn-reset-view" title="Vista inicial">⌂</button>
+            <label class="speed">Velocidad <input type="range" id="speed" min="0.4" max="2.5" step="0.1" value="1"></label>
+          </div>
+        </div>
+        <div class="step-card" id="step-card">
+          <div class="step-meta"><span id="step-stage"></span><span id="step-counter"></span></div>
+          <div class="step-moves" id="step-moves"></div>
+          <p class="step-label" id="step-label"></p>
+          <p class="step-text" id="step-text"></p>
+          <div class="step-actions">
+            <button class="btn ghost" id="btn-prev">‹ Atrás</button>
+            <button class="btn primary big" id="btn-done">Hecho ✓</button>
+          </div>
+          <div class="step-extra">
+            <button class="link-btn" id="btn-lost">Me he perdido: volver a escanear el cubo</button>
+          </div>
+        </div>
+        <div class="progress-strip" id="stage-strip"></div>
+      </div>
+      <div class="solve-right">
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Grafo de pegatinas</h3>
+            <span class="panel-sub">54 vértices · el anillo resaltado es la arista que se está recorriendo</span>
+          </div>
+          <svg id="sticker-graph" viewBox="-100 -100 200 200"></svg>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Vecinos de tu vértice</h3>
+            <span class="panel-sub" id="neighbors-sub"></span>
+          </div>
+          <svg id="neighbor-graph" viewBox="-130 -110 260 220"></svg>
+          <div class="legend" id="neighbor-legend"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
+            <h3 id="levels-title">Capas del grafo de la fase</h3>
+            <span class="panel-sub" id="levels-sub"></span>
+          </div>
+          <svg id="levels-graph" viewBox="0 0 320 170"></svg>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Tu camino</h3>
+            <span class="panel-sub" id="path-sub"></span>
+          </div>
+          <svg id="path-graph" viewBox="0 0 320 150"></svg>
+        </div>
+        <div class="panel tutor" id="tutor-panel">
+          <div class="panel-head">
+            <h3>Tutor</h3>
+            <span class="panel-sub" id="tutor-status"></span>
+          </div>
+          <div class="tutor-log" id="tutor-log"></div>
+          <form class="tutor-form" id="tutor-form">
+            <input id="tutor-input" placeholder="Pregunta lo que quieras sobre este paso…" autocomplete="off">
+            <button class="btn" type="submit">Enviar</button>
+          </form>
+          <button class="link-btn" id="btn-explain">Explícame este paso con otras palabras</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="modal" id="modal" hidden>
+    <div class="modal-card">
+      <div id="modal-body"></div>
+      <div class="modal-actions" id="modal-actions"></div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <span>Método por capas + BFS · Kociemba dos fases + IDA*</span>
+  {% if site_domain %}<span>{{ site_domain }}</span>{% endif %}
+</footer>
+
+<script type="module" src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

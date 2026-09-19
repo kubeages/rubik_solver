@@ -1,0 +1,16 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: rubik-solver
+  annotations:
+    haproxy.router.openshift.io/timeout: "90s"
+spec:
+  host: rubik-solver.example.com
+  to:
+    kind: Service
+    name: rubik-solver
+  port:
+    targetPort: 8080
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

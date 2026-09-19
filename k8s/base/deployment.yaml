@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rubik-solver
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rubik-solver
+  template:
+    metadata:
+      labels:
+        app: rubik-solver
+    spec:
+      containers:
+      - name: rubik-solver
+        image: rubik-solver:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+        env:
+        - name: VLLM_MODEL
+          value: "qwen32b"
+        # Site-specific values (VLLM_ENDPOINT, SITE_DOMAIN) and the API key live
+        # outside git; both sources are optional, the app runs without the tutor.
+        envFrom:
+        - configMapRef:
+            name: rubik-solver-config
+            optional: true
+        - secretRef:
+            name: rubik-solver-llm
+            optional: true
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 3
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        resources:
+          requests:
+            cpu: 100m
+            memory: 192Mi
+          limits:
+            cpu: "1"
+            memory: 512Mi
