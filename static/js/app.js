@@ -1,6 +1,7 @@
 import { COLORS, COLOR_KEYS, CubeModel, STANDARD_SCHEME } from "./cubemodel.js";
 import { Capture, assemble, VIEW2_COUNT } from "./capture.js";
 import { StickerGraph, drawNeighbors, drawLevels, drawPath, drawCaptureGuide } from "./graphs.js";
+import { INFO, attachInfoButtons } from "./info.js";
 
 const $ = (id) => document.getElementById(id);
 const api = async (url, body) => {
@@ -53,6 +54,11 @@ function modal(html, actions = [{ label: "Entendido", primary: true }]) {
     });
     $("modal").hidden = false;
   });
+}
+
+function openInfo(key) {
+  const entry = INFO[key];
+  if (entry) modal(`<h3>${entry.title}</h3>${entry.html}`, [{ label: "Entendido", primary: true }]);
 }
 
 const colorName = (key) => (COLORS[key] ? COLORS[key].name : "?");
@@ -563,6 +569,7 @@ async function boot() {
   app.model = new CubeModel(app.meta);
   heroAnimation();
   initCapture();
+  attachInfoButtons(openInfo);
 
   document.querySelectorAll("[data-action]").forEach((b) => b.addEventListener("click", async () => {
     const a = b.dataset.action;

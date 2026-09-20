@@ -193,6 +193,18 @@ p { margin: 0 0 .8em; }
 .progress-strip .seg.current { color: var(--accent); font-weight: 600; }
 
 .solve-right { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
+.info-btn {
+  position: absolute; top: 10px; right: 10px; width: 24px; height: 24px; border-radius: 50%;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink-3);
+  font: 700 .82rem/1 Georgia, serif; font-style: italic; cursor: pointer; z-index: 2;
+  display: grid; place-items: center; padding: 0;
+}
+.info-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.panel, .step-card, .cube3d-wrap, .capture-guide, .mode-card, #panel-review { position: relative; }
+.panel-head, .step-meta { padding-right: 28px; }
+#panel-review > h2 { padding-right: 32px; }
+.cube3d-wrap .info-btn { background: color-mix(in srgb, var(--surface) 85%, transparent); }
+
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
 .panel-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; }
 .panel-head h3 { margin: 0; }
@@ -227,8 +239,17 @@ svg .mono { font-family: var(--mono); }
 /* modal */
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: grid; place-items: center; z-index: 50; padding: 16px; }
 .modal[hidden] { display: none; }
-.modal-card { background: var(--surface); border-radius: var(--radius); padding: 22px; max-width: 520px; width: 100%; box-shadow: var(--shadow); }
-.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; flex-wrap: wrap; }
+.modal-card { background: var(--surface); border-radius: var(--radius); padding: 22px; max-width: 560px; width: 100%; box-shadow: var(--shadow); max-height: 86vh; overflow-y: auto; }
+.modal-card h4 { margin: 14px 0 4px; font-size: .92rem; color: var(--accent); }
+.modal-card ul { margin: 0 0 8px; padding-left: 20px; color: var(--ink-2); font-size: .93rem; }
+.modal-card li { margin-bottom: 5px; }
+.modal-card p { font-size: .95rem; color: var(--ink-2); }
+.modal-card p:first-of-type { color: var(--ink); }
+.modal-actions {
+  display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;
+  position: sticky; bottom: -22px; margin: 16px -22px -22px; padding: 12px 22px;
+  background: var(--surface); border-top: 1px solid var(--line);
+}
 
 footer { display: flex; justify-content: space-between; gap: 12px; padding: 14px 16px; font-size: .8rem; color: var(--ink-3); border-top: 1px solid var(--line); flex-wrap: wrap; }
 

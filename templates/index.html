@@ -108,7 +108,7 @@
   <!-- 3 · Revisar -->
   <section class="screen" id="screen-review">
     <div class="review-layout">
-      <div>
+      <div id="panel-review">
         <h2>Revisa los colores</h2>
         <p class="lead">Pulsa una pegatina para cambiar su color. Los centros definen qué color es cada cara.</p>
         <div class="palette" id="palette"></div>
@@ -168,14 +168,14 @@
         <div class="progress-strip" id="stage-strip"></div>
       </div>
       <div class="solve-right">
-        <div class="panel">
+        <div class="panel" id="panel-sticker">
           <div class="panel-head">
             <h3>Grafo de pegatinas</h3>
             <span class="panel-sub">54 vértices · el anillo resaltado es la arista que se está recorriendo</span>
           </div>
           <svg id="sticker-graph" viewBox="-100 -100 200 200"></svg>
         </div>
-        <div class="panel">
+        <div class="panel" id="panel-neighbors">
           <div class="panel-head">
             <h3>Vecinos de tu vértice</h3>
             <span class="panel-sub" id="neighbors-sub"></span>
@@ -183,14 +183,14 @@
           <svg id="neighbor-graph" viewBox="-130 -110 260 220"></svg>
           <div class="legend" id="neighbor-legend"></div>
         </div>
-        <div class="panel">
+        <div class="panel" id="panel-levels">
           <div class="panel-head">
             <h3 id="levels-title">Capas del grafo de la fase</h3>
             <span class="panel-sub" id="levels-sub"></span>
           </div>
           <svg id="levels-graph" viewBox="0 0 320 170"></svg>
         </div>
-        <div class="panel">
+        <div class="panel" id="panel-path">
           <div class="panel-head">
             <h3>Tu camino</h3>
             <span class="panel-sub" id="path-sub"></span>
