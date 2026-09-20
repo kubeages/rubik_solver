@@ -8,6 +8,7 @@ import threading
 
 from flask import Flask, jsonify, render_template, request
 
+import auth
 from cube import stages, tutor, twophase
 from cube.model import (CORNER_FACELETS, EDGE_FACELETS, FACES, MOVE_PERMS, MOVES, SOLVED, STICKERS, InvalidCube,
                         apply_moves, random_state, ring_cycles, validate)
@@ -15,6 +16,7 @@ from cube.model import (CORNER_FACELETS, EDGE_FACELETS, FACES, MOVE_PERMS, MOVES
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("rubik")
+auth.init(app)  # /login gate; open when no password is configured
 
 SITE_DOMAIN = os.environ.get("SITE_DOMAIN", "")
 # TwoPhaseSolver keeps its search state on the instance: one search at a time per worker.
@@ -34,7 +36,7 @@ threading.Thread(target=_warm_up, daemon=True).start()
 
 @app.context_processor
 def inject_globals():
-    return {"site_domain": SITE_DOMAIN}
+    return {"site_domain": SITE_DOMAIN, "auth_enabled": auth.enabled()}
 
 
 @app.route("/")
@@ -166,4 +168,5 @@ def healthz():
 
 
 if __name__ == "__main__":
+    app.config["SESSION_COOKIE_SECURE"] = False  # plain http in local development
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=True)

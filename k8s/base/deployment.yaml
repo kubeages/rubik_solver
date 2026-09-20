@@ -30,6 +30,10 @@ spec:
         - secretRef:
             name: rubik-solver-llm
             optional: true
+        # AUTH_USER / AUTH_PASSWORD_HASH: without this Secret the app has no login
+        - secretRef:
+            name: rubik-solver-auth
+            optional: true
         readinessProbe:
           httpGet:
             path: /healthz

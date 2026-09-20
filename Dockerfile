@@ -10,7 +10,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY cube/ cube/
 RUN python -c "from cube import twophase; twophase.load_tables()" && chmod -R a+rX /app/tables
 
-COPY app.py .
+COPY app.py auth.py ./
 COPY templates/ templates/
 COPY static/ static/
 

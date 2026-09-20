@@ -68,6 +68,8 @@ p { margin: 0 0 .8em; }
   width: 22px; height: 22px; border-radius: 5px;
   background: conic-gradient(#c8252c 0 25%, #f7c928 0 50%, #1f8a4c 0 75%, #1f5fbf 0);
 }
+.logout { order: 3; font-size: .85rem; color: var(--ink-3); text-decoration: none; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; }
+.logout:hover { color: var(--ink); border-color: var(--ink-3); }
 .steps-nav { display: flex; gap: 4px; flex-wrap: wrap; font-size: .85rem; }
 .steps-nav span { padding: 4px 10px; border-radius: 999px; color: var(--ink-3); }
 .steps-nav span.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }

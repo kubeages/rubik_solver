@@ -1,0 +1,69 @@
+"""The login gate: tests reload the modules with credentials in the environment."""
+
+import importlib
+
+import pytest
+
+
+@pytest.fixture()
+def secured(monkeypatch):
+    from werkzeug.security import generate_password_hash
+    monkeypatch.setenv("AUTH_USER", "marta")
+    monkeypatch.setenv("AUTH_PASSWORD_HASH", generate_password_hash("secreta"))
+    monkeypatch.setenv("COOKIE_SECURE", "0")
+    import auth
+    import app as app_module
+    importlib.reload(auth)
+    app_module = importlib.reload(app_module)
+    yield app_module.app.test_client()
+    monkeypatch.undo()
+    importlib.reload(auth)
+    importlib.reload(app_module)
+
+
+def test_pages_redirect_to_login(secured):
+    r = secured.get("/")
+    assert r.status_code == 302 and "/login" in r.headers["Location"]
+
+
+def test_api_returns_401_not_a_redirect(secured):
+    r = secured.post("/api/validate", json={"facelets": "U" * 54})
+    assert r.status_code == 401 and r.get_json()["error"]
+
+
+def test_healthz_stays_open(secured):
+    assert secured.get("/healthz").status_code == 200
+
+
+def test_login_and_logout(secured):
+    assert secured.post("/login", data={"username": "marta", "password": "mala"}).status_code == 401
+    r = secured.post("/login", data={"username": "marta", "password": "secreta"})
+    assert r.status_code == 302
+    assert secured.get("/").status_code == 200
+    secured.get("/logout")
+    assert secured.get("/").status_code == 302
+
+
+def test_login_keeps_the_requested_page(secured):
+    r = secured.get("/api/meta", follow_redirects=False)
+    assert r.status_code == 401
+    r = secured.get("/", follow_redirects=False)
+    assert "next=%2F" in r.headers["Location"] or "next=/" in r.headers["Location"]
+
+
+def test_open_redirects_are_refused(secured):
+    secured.post("/login", data={"username": "marta", "password": "secreta"})
+    r = secured.get("/login?next=https://evil.example.com/")
+    assert r.headers["Location"] == "/"
+
+
+def test_lockout_after_repeated_failures(secured):
+    for _ in range(9):
+        secured.post("/login", data={"username": "marta", "password": "mala"})
+    r = secured.post("/login", data={"username": "marta", "password": "secreta"})
+    assert r.status_code == 401 and "Demasiados intentos" in r.get_data(as_text=True)
+
+
+def test_without_password_the_app_is_open():
+    import app as app_module
+    assert app_module.app.test_client().get("/").status_code == 200

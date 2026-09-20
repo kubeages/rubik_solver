@@ -31,6 +31,9 @@ camera (or upload two photos), confirm each move as you make it, and watch the p
   - the **neighbourhood** of your current vertex, every edge coloured by the distance (or lower bound) it leads to;
   - the **BFS layers** of the stage graph (or the pattern database) with your position;
   - the **path** so far.
+- **Login gate (optional).** A username/password form with a signed session cookie, credentials
+  read from the environment (a Secret on the cluster), plus a lockout after repeated failures.
+  Leave it unset and the app runs open, which is what you want on `localhost`.
 - **LLM tutor (optional).** Any OpenAI-compatible endpoint (vLLM, Ollama…) answers questions about
   the current step. The app works fully without it.
 
@@ -75,11 +78,16 @@ oc new-project rubik-solver
 oc new-build --name=rubik-solver --binary --strategy=docker
 oc start-build rubik-solver --from-dir=. --follow
 
-# 2. Site-specific settings (kept out of git; both are optional)
+# 2. Site-specific settings (kept out of git; all optional)
 oc create configmap rubik-solver-config \
   --from-literal=VLLM_ENDPOINT=http://your-llm-host:8000/v1 \
   --from-literal=SITE_DOMAIN=rubik-solver.your-cluster.example.com
 oc create secret generic rubik-solver-llm --from-literal=VLLM_API_KEY=...
+
+# Login (skip it and the app is open to anyone who can reach the route)
+HASH=$(python -c "from werkzeug.security import generate_password_hash as g; print(g('your-password'))")
+oc create secret generic rubik-solver-auth \
+  --from-literal=AUTH_USER=you --from-literal=AUTH_PASSWORD_HASH="$HASH"
 
 # 3. Deploy, then set the real route host
 oc apply -k k8s/overlays/openshift/
@@ -108,6 +116,12 @@ kubectl apply -k k8s/overlays/kubernetes/
 
 | Variable | Default | Description |
 |---|---|---|
+| `AUTH_USER` | _(empty)_ | Username for the login form. Empty = any username |
+| `AUTH_PASSWORD_HASH` | _(empty)_ | Password hash (`werkzeug.security.generate_password_hash`) |
+| `AUTH_PASSWORD` | _(empty)_ | Plain password, if you prefer it to the hash. Both empty = no login |
+| `AUTH_SESSION_DAYS` | `30` | How long a session lasts |
+| `SECRET_KEY` | _(derived)_ | Signs the session cookie; derived from the credentials when unset |
+| `COOKIE_SECURE` | `1` | Set to `0` only when serving over plain http |
 | `VLLM_ENDPOINT` | _(empty)_ | OpenAI-compatible API URL for the tutor. Empty = tutor off |
 | `VLLM_MODEL` | `qwen32b` | Model name |
 | `VLLM_API_KEY` | _(empty)_ | Bearer token, if the endpoint needs one |
@@ -134,6 +148,7 @@ plus the gitignored `route.local.yaml` on the cluster.
 
 ```
 ├── app.py                   # Flask app + JSON API
+├── auth.py                  # optional login gate
 ├── cube/
 │   ├── model.py             # facelets/cubies, moves derived from 3D geometry, validation
 │   ├── twophase.py          # Kociemba two-phase, instrumented for explanations
@@ -143,6 +158,7 @@ plus the gitignored `route.local.yaml` on the cluster.
 ├── static/
 │   ├── css/app.css
 │   └── js/                  # app.js, capture.js, cube3d.js, graphs.js, cubemodel.js
+├── templates/login.html
 ├── tests/                   # pytest
 ├── Dockerfile
 └── k8s/                     # Kustomize base + openshift / kubernetes overlays
