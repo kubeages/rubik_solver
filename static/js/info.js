@@ -158,6 +158,16 @@ export const INFO = {
     title: "Cómo hacer las fotos",
     html: `
       <p>Hacen falta <b>dos fotos</b>: cada una muestra tres caras, y entre las dos se ven las seis.</p>
+      <h4>Se dispara sola</h4>
+      <ul>
+        <li>Mientras enfocas, la aplicación analiza cada fotograma y <b>busca el cubo</b>: el hexágono
+        se mueve y gira hasta encajar en él, así que no hace falta que lo coloques con precisión.</li>
+        <li>La barra de abajo dice cómo va. <span style="color:var(--bad)">Roja</span>: no encuentra el
+        cubo. <span style="color:#d29b00">Ámbar</span>: casi. <span style="color:var(--good)">Verde</span>:
+        listo, y en cuanto lo sostengas quieto un instante, hace la foto.</li>
+        <li>Los círculos pequeños muestran el color que está leyendo en cada pegatina.</li>
+        <li>Si prefieres disparar tú, quita «Captura automática» y usa «Capturar ahora».</li>
+      </ul>
       <h4>Paso a paso</h4>
       <ul>
         <li><b>Foto 1:</b> apunta a la cámara con la esquina de arriba-delante-derecha. Se ven las

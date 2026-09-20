@@ -120,6 +120,25 @@ p { margin: 0 0 .8em; }
   position: absolute; inset: 0; width: 100%; height: 100%;
 }
 .capture-canvas-wrap video, .capture-canvas-wrap canvas { object-fit: contain; }
+.quality {
+  position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: 3;
+  background: rgba(15,15,18,.72); color: #fff; border-radius: 10px; padding: 8px 12px;
+  backdrop-filter: blur(4px); font-size: .9rem; font-weight: 600; text-align: center;
+  display: flex; flex-direction: column; gap: 6px; pointer-events: none;
+}
+.quality-bar { display: block; height: 5px; border-radius: 3px; background: rgba(255,255,255,.22); overflow: hidden; }
+.quality-bar i { display: block; height: 100%; background: #ff5a5a; transition: width .15s linear, background .2s; }
+.quality.near .quality-bar i { background: #ffc83c; }
+.quality.ok .quality-bar i { background: #40dc78; }
+.quality.ok { background: rgba(20,80,45,.8); }
+.capture-canvas-wrap.flash::after {
+  content: ""; position: absolute; inset: 0; background: #fff; z-index: 4;
+  animation: flash .35s ease-out forwards;
+}
+@keyframes flash { from { opacity: .85; } to { opacity: 0; } }
+.auto-toggle { display: inline-flex; align-items: center; gap: 7px; font-size: .9rem; color: var(--ink-2); cursor: pointer; padding: 10px 4px; }
+.auto-toggle input { width: 17px; height: 17px; accent-color: var(--accent); }
+
 .capture-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0 4px; }
 .capture-guide { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; align-self: start; }
 .capture-guide svg { width: 100%; max-width: 220px; display: block; margin: 0 auto 12px; }

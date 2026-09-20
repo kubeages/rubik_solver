@@ -109,6 +109,7 @@ function initCapture() {
     canvas: $("capture-canvas"), overlay: $("capture-overlay"), shoot: $("btn-shoot"),
     uploadLabel: $("btn-upload-label"), file: $("file-input"), retake: $("btn-retake"),
     use: $("btn-use"), cancel: $("btn-capture-cancel"), hint: $("capture-hint"),
+    quality: $("capture-quality"), autoToggle: $("auto-toggle"),
     onGuide: (view) => drawCaptureGuide($("capture-guide-svg"), view),
   }, {
     onDone: (res) => {

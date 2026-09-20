@@ -283,6 +283,196 @@ export function plausibility(model, colors) {
 export const VIEW2_COUNT = VIEW2_ROTATIONS.length;
 
 // ---------------------------------------------------------------------------
+// Live quality check of the camera preview
+// ---------------------------------------------------------------------------
+
+function patchStats(data, w, h, x, y, r) {
+  const x0 = Math.max(0, Math.round(x - r)), y0 = Math.max(0, Math.round(y - r));
+  const x1 = Math.min(w - 1, Math.round(x + r)), y1 = Math.min(h - 1, Math.round(y + r));
+  if (x1 < x0 || y1 < y0) return null;
+  let n = 0, sr = 0, sg = 0, sb = 0, minL = 255, maxL = 0;
+  for (let py = y0; py <= y1; py++) for (let px = x0; px <= x1; px++) {
+    const k = (py * w + px) * 4;
+    const R = data[k], G = data[k + 1], B = data[k + 2];
+    const L = 0.299 * R + 0.587 * G + 0.114 * B;
+    sr += R; sg += G; sb += B; n++;
+    if (L < minL) minL = L;
+    if (L > maxL) maxL = L;
+  }
+  if (!n) return null;
+  const rgb = [sr / n, sg / n, sb / n];
+  const luma = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
+  const mx = Math.max(...rgb), mn = Math.min(...rgb);
+  return { rgb, luma, minLuma: minL, spread: maxL - minL, sat: mx > 0 ? (mx - mn) / mx : 0 };
+}
+
+const READY_SCORE = 0.8;
+const HOLD_FRAMES = 4;   // consecutive good frames before the shot is taken
+
+// The seven handles of a regular hexagon, from position, size and rotation.
+export function poseHandles(cx, cy, r, theta) {
+  const out = { C: [cx, cy] };
+  for (const [k, a] of Object.entries(HANDLE_ANGLE)) {
+    const ang = (a * Math.PI) / 180 + theta;
+    out[k] = [cx + r * Math.cos(ang), cy + r * Math.sin(ang)];
+  }
+  return out;
+}
+
+// Score of a candidate pose: how dark the grid lines are compared with the
+// stickers around them, sampled all along each line. Averaging over the whole
+// line (instead of a few points) makes the score fall off gently as the
+// hexagon drifts, which is what the search below needs.
+function poseScore(model, data, w, h, pose) {
+  const handles = poseHandles(...pose);
+  const cell = pose[2] / 3;
+  const rSticker = Math.max(1, cell * 0.12);
+  const rLine = Math.max(1, cell * 0.06);
+  const ALONG = 15;
+  let sum = 0, count = 0, outside = 0;
+  for (const axis of [0, 1, 2]) {
+    const [i, j] = [0, 1, 2].filter((k) => k !== axis);
+    const corner = (si, sj) => {
+      const v = [0, 0, 0];
+      v[axis] = 1; v[i] = si; v[j] = sj;
+      return handles[VEC_HANDLE[v.join(",")]];
+    };
+    const H = squareToQuad(corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1));
+    const mid = [1 / 6, 1 / 2, 5 / 6];
+    const lumas = [];
+    for (const u of mid) for (const v of mid) {
+      const xy = H(u, v);
+      if (xy[0] < 0 || xy[1] < 0 || xy[0] >= w || xy[1] >= h) outside++;
+      const st = patchStats(data, w, h, xy[0], xy[1], rSticker);
+      if (st) lumas.push(st.luma);
+    }
+    if (lumas.length < 9) continue;
+    lumas.sort((x, y) => x - y);
+    const ref = lumas[4];               // median sticker of this face
+    for (const t of [1 / 3, 2 / 3]) {
+      for (let k = 0; k < ALONG; k++) {
+        const a = 0.04 + (0.92 * k) / (ALONG - 1);
+        for (const p of [H(t, a), H(a, t)]) {
+          const g = patchStats(data, w, h, p[0], p[1], rLine);
+          if (!g) continue;
+          sum += Math.min(1, Math.max(0, (ref - g.luma) / Math.max(25, ref * 0.4)));
+          count++;
+        }
+      }
+    }
+  }
+  return count ? sum / count - outside * 0.02 : 0;
+}
+
+export function fitPose(model, data, w, h, start) {
+  const m = Math.min(w, h);
+  const minR = m * 0.2, maxR = m * 0.48;
+  const inside = (p) => p[2] >= minR && p[2] <= maxR &&
+    p[0] > w * 0.2 && p[0] < w * 0.8 && p[1] > h * 0.15 && p[1] < h * 0.85 && Math.abs(p[3]) < 0.45;
+
+  const descend = (from, steps0, rounds) => {
+    let best = from.slice();
+    let bestScore = poseScore(model, data, w, h, best);
+    let steps = steps0.slice();
+    for (let round = 0; round < rounds; round++) {
+      let improved = false;
+      for (let k = 0; k < 4; k++) for (const dir of [1, -1]) {
+        const cand = best.slice();
+        cand[k] += dir * steps[k];
+        if (!inside(cand)) continue;
+        const sc = poseScore(model, data, w, h, cand);
+        if (sc > bestScore + 1e-4) { best = cand; bestScore = sc; improved = true; }
+      }
+      if (!improved) steps = steps.map((v) => v * 0.5);
+    }
+    return best;
+  };
+
+  // pick the most promising size, then walk position, size and rotation
+  const seeds = [];
+  for (let f = 0.24; f <= 0.46; f += 0.03) seeds.push([w / 2, h / 2, m * f, 0]);
+  if (start) seeds.unshift(start);
+  let best = null, bestScore = -Infinity;
+  for (const seed of seeds) {
+    const sc = poseScore(model, data, w, h, seed);
+    if (sc > bestScore) { best = seed; bestScore = sc; }
+  }
+  best = descend(best, [w * 0.02, w * 0.02, w * 0.018, 0.05], 8);
+  if (start) {
+    const alt = descend(start, [w * 0.012, w * 0.012, w * 0.01, 0.03], 6);
+    if (poseScore(model, data, w, h, alt) > poseScore(model, data, w, h, best)) best = alt;
+  }
+  return { pose: best, fit: poseScore(model, data, w, h, best) };
+}
+
+// How well does the picture behind `handles` look like a cube right now?
+//
+// The telling signal is the black plastic between stickers: on a cube lined up
+// with the hexagon, every point on the grid lines is clearly darker than the
+// two stickers beside it. A flat wall or a cube out of place fails that.
+export function evaluateFrame(model, handles, data, w, h, previous) {
+  const span = Math.hypot(handles.C[0] - handles.T[0], handles.C[1] - handles.T[1]);
+  const r = Math.max(1, (span / 3) * 0.14);
+  const stickers = [];
+  const points = [];
+  const gaps = [];
+  const at = (c) => c && c[Math.round(c.length / 2)];
+  for (const axis of [0, 1, 2]) {
+    const [i, j] = [0, 1, 2].filter((k) => k !== axis);
+    const corner = (si, sj) => {
+      const v = [0, 0, 0];
+      v[axis] = 1; v[i] = si; v[j] = sj;
+      return handles[VEC_HANDLE[v.join(",")]];
+    };
+    const H = squareToQuad(corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1));
+    const mid = [1 / 6, 1 / 2, 5 / 6];
+    const cells = mid.map((u) => mid.map((v) => {
+      const xy = H(u, v);
+      const st = patchStats(data, w, h, xy[0], xy[1], r);
+      if (st) { stickers.push(st); points.push({ xy }); }
+      return st;
+    }));
+    // points on the lines between neighbouring stickers, in both directions
+    for (let a = 0; a < 2; a++) for (let b = 0; b < 3; b++) {
+      for (const [p, n1, n2] of [
+        [H((a + 1) / 3, mid[b]), cells[a][b], cells[a + 1][b]],
+        [H(mid[b], (a + 1) / 3), cells[b][a], cells[b][a + 1]],
+      ]) {
+        const g = patchStats(data, w, h, p[0], p[1], Math.max(1, r * 0.3));
+        if (g && n1 && n2) gaps.push({ luma: g.luma, neighbour: Math.min(n1.luma, n2.luma) });
+      }
+    }
+  }
+  if (stickers.length < 27 || gaps.length < 30) {
+    return { score: 0, ready: false, message: "Encaja el cubo dentro del hexágono", colors: [], points: [] };
+  }
+  // a gap counts when it is clearly darker than the stickers around it
+  const dark = gaps.filter((g) => g.luma < Math.max(0.72 * g.neighbour, 30) || g.luma < 55).length / gaps.length;
+  const flat = stickers.filter((s) => s.spread < 70).length / stickers.length;
+  const cubeLike = stickers.filter((s) => s.sat > 0.28 || s.luma > 120).length / stickers.length;
+  let moved = 0;
+  if (previous && previous.length === stickers.length) {
+    moved = stickers.reduce((acc, s, k) => acc +
+      Math.abs(s.rgb[0] - previous[k][0]) + Math.abs(s.rgb[1] - previous[k][1]) +
+      Math.abs(s.rgb[2] - previous[k][2]), 0) / stickers.length / 3;
+  }
+  const steady = previous ? moved < 9 : false;
+  const score = 0.5 * dark + 0.25 * flat + 0.25 * cubeLike;
+  let message;
+  if (score < 0.45) message = "Pon el cubo dentro del hexágono, con una esquina hacia la cámara";
+  else if (dark < 0.7) message = "Encaja mejor: las líneas del hexágono deben caer entre las pegatinas";
+  else if (score < READY_SCORE) message = "Casi: acerca el cubo hasta llenar el hexágono";
+  else if (!steady) message = "Sujétalo quieto…";
+  else message = "¡Listo!";
+  return {
+    score, ready: score >= READY_SCORE && dark >= 0.8 && steady, message,
+    metrics: { dark, flat, cubeLike, moved },
+    colors: stickers.map((s) => s.rgb),
+    points,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Capture UI controller
 // ---------------------------------------------------------------------------
 
@@ -299,8 +489,19 @@ export class Capture {
     this.handles = null;
     this.dragging = null;
     this.mode = "camera";
+    this.auto = true;          // take the picture by itself when it looks right
+    this._live = null;         // last evaluation of the preview
+    this._readyFrames = 0;
+    this._prevColors = null;
+    this._pose = null;         // hexagon tracked on the cube: [cx, cy, r, angle]
 
     els.shoot.addEventListener("click", () => this.shoot());
+    if (els.autoToggle) {
+      els.autoToggle.addEventListener("change", () => {
+        this.auto = els.autoToggle.checked;
+        this._readyFrames = 0;
+      });
+    }
     els.retake.addEventListener("click", () => this.startCamera());
     els.use.addEventListener("click", () => this.useView());
     els.cancel.addEventListener("click", () => { this.stop(); this.onCancel(); });
@@ -357,7 +558,10 @@ export class Capture {
       this.size = [w, h];
       this.handles = this._defaultHandles(w, h);
       this._renderOverlay({ interactive: false });
-      this.els.hint.textContent = "Acerca o aleja el cubo hasta que encaje en el hexágono y pulsa Capturar. Luego podrás ajustar los puntos.";
+      this.els.hint.textContent = this.auto
+        ? "Coloca el cubo en el hexágono: la foto se toma sola en cuanto se vea bien."
+        : "Acerca o aleja el cubo hasta que encaje en el hexágono y pulsa Capturar.";
+      this._startLiveCheck();
     } catch (err) {
       this._cameraError("No se pudo abrir la cámara: " + (err.message || err) + ". Puedes subir una foto.");
     }
@@ -376,7 +580,79 @@ export class Capture {
     this.els.overlay.removeAttribute("viewBox");
   }
 
+  _startLiveCheck() {
+    this._stopLiveCheck();
+    this._readyFrames = 0;
+    this._prevColors = null;
+    this._pose = null;
+    const tick = () => {
+      this._liveTimer = null;
+      if (this._checkFrame() === "captured") return;
+      this._liveTimer = setTimeout(tick, 170);
+    };
+    tick();
+  }
+
+  _stopLiveCheck() {
+    if (this._liveTimer) clearTimeout(this._liveTimer);
+    this._liveTimer = null;
+    this._live = null;
+    if (this.els.quality) this.els.quality.hidden = true;
+  }
+
+  // One evaluation of the live preview; captures by itself when it stays good.
+  _checkFrame() {
+    const v = this.els.video;
+    if (!v.videoWidth || v.paused || this.els.use.hidden === false) return "idle";
+    const [w, h] = this.size;
+    if (!this._scratch) this._scratch = document.createElement("canvas");
+    const sw = 480, sh = Math.round((480 * h) / w);
+    if (this._scratch.width !== sw) { this._scratch.width = sw; this._scratch.height = sh; }
+    const ctx = this._scratch.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(v, 0, 0, sw, sh);
+    const data = ctx.getImageData(0, 0, sw, sh).data;
+    const k = sw / w;
+    // snap the hexagon onto the cube, carrying on from the previous frame
+    const { pose } = fitPose(this.model, data, sw, sh, this._pose);
+    this._pose = pose;
+    const small = poseHandles(...pose);
+    this.handles = Object.fromEntries(Object.entries(small).map(([n, p]) => [n, [p[0] / k, p[1] / k]]));
+    const res = evaluateFrame(this.model, small, data, sw, sh, this._prevColors);
+    // the evaluation ran on the reduced frame: bring its points back to video size
+    res.points = res.points.map((p) => ({ xy: [p.xy[0] / k, p.xy[1] / k] }));
+    this._prevColors = res.colors.length ? res.colors : null;
+    this._live = res;
+    this._readyFrames = res.ready ? this._readyFrames + 1 : 0;
+    this._showQuality(res);
+    this._renderOverlay({ interactive: false });
+    if (this.auto && this._readyFrames >= HOLD_FRAMES) {
+      this._flash();
+      this.shoot();
+      return "captured";
+    }
+    return "checking";
+  }
+
+  _showQuality(res) {
+    const box = this.els.quality;
+    if (!box) return;
+    box.hidden = false;
+    const level = res.ready ? "ok" : res.score >= 0.6 ? "near" : "bad";
+    box.className = `quality ${level}`;
+    const held = Math.min(1, this._readyFrames / HOLD_FRAMES);
+    box.innerHTML =
+      `<span class="quality-bar"><i style="width:${Math.round(Math.min(1, res.score / READY_SCORE) * 100)}%"></i></span>` +
+      `<span class="quality-msg">${res.message}${this.auto && res.ready ? ` ${Math.round(held * 100)}%` : ""}</span>`;
+  }
+
+  _flash() {
+    const wrap = this.els.canvas.parentElement;
+    wrap.classList.add("flash");
+    setTimeout(() => wrap.classList.remove("flash"), 350);
+  }
+
   stop() {
+    this._stopLiveCheck();
     if (this.stream) {
       this.stream.getTracks().forEach((t) => t.stop());
       this.stream = null;
@@ -386,6 +662,7 @@ export class Capture {
   _showButtons(state) {
     const e = this.els;
     e.shoot.hidden = state !== "camera";
+    if (e.autoToggle) e.autoToggle.parentElement.hidden = state !== "camera";
     e.uploadLabel.hidden = state === "adjust";
     e.retake.hidden = !(state === "adjust" && this.mode === "camera");
     e.use.hidden = state !== "adjust";
@@ -402,6 +679,7 @@ export class Capture {
   }
 
   shoot() {
+    this._stopLiveCheck();
     const v = this.els.video;
     const [w, h] = [v.videoWidth, v.videoHeight];
     if (!w) return;
@@ -457,10 +735,24 @@ export class Capture {
     const s = Math.min(w, h) / 480;
     const g = document.createElementNS(NS, "g");
     svg.appendChild(g);
+    const live = this._live;
+    const stroke = !live ? "rgba(255,255,255,.85)"
+      : live.ready ? "rgba(64,220,120,.95)"
+        : live.score >= 0.6 ? "rgba(255,200,60,.95)" : "rgba(255,90,90,.9)";
     for (const [a, b] of gridLines(this.model, this.handles)) {
       const l = document.createElementNS(NS, "line");
-      Object.entries({ x1: a[0], y1: a[1], x2: b[0], y2: b[1], stroke: "rgba(255,255,255,.85)", "stroke-width": 1.6 * s }).forEach(([k, v]) => l.setAttribute(k, v));
+      Object.entries({ x1: a[0], y1: a[1], x2: b[0], y2: b[1], stroke, "stroke-width": (live && live.ready ? 2.4 : 1.6) * s }).forEach(([k, v]) => l.setAttribute(k, v));
       g.appendChild(l);
+    }
+    if (live && live.points && live.score > 0.45) {
+      live.points.forEach((p, i) => {
+        const rgb = live.colors[i];
+        if (!rgb) return;
+        const c = document.createElementNS(NS, "circle");
+        Object.entries({ cx: p.xy[0], cy: p.xy[1], r: 5 * s, fill: `rgb(${rgb.map(Math.round).join(",")})`,
+                         stroke: "rgba(255,255,255,.8)", "stroke-width": 1.2 * s }).forEach(([k, v]) => c.setAttribute(k, v));
+        g.appendChild(c);
+      });
     }
     if (interactive && this.points) {
       for (const p of this.points) {
