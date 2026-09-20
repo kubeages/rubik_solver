@@ -575,6 +575,62 @@ function footprintOverlap(centers, blobs, cell) {
   return union > 0 ? inter / union : 0;
 }
 
+// Does the outline sit on the cube's edge?
+//
+// The lines inside a cube repeat every cell, so a grid half a cell off scores
+// nearly as well on them. The silhouette does not repeat: along it there is a
+// step between the cube and whatever is behind. Measuring that step pins the
+// grid where the interior alone cannot.
+export function borderScore(handles, data, w, h, cell) {
+  const lum = (x, y) => {
+    const px = Math.round(x), py = Math.round(y);
+    if (px < 1 || py < 1 || px >= w - 1 || py >= h - 1) return null;
+    const k = (py * w + px) * 4;
+    return 0.299 * data[k] + 0.587 * data[k + 1] + 0.114 * data[k + 2];
+  };
+  const ring = ["T", "UR", "LR", "B", "LL", "UL"].map((k) => handles[k]);
+  let cx = 0, cy = 0;
+  for (const p of ring) { cx += p[0] / 6; cy += p[1] / 6; }
+  const reach = Math.max(2, cell * 0.45);
+  let sum = 0, count = 0;
+  for (let i = 0; i < 6; i++) {
+    const a = ring[i], b = ring[(i + 1) % 6];
+    for (let t = 0.12; t <= 0.88; t += 0.11) {
+      const x = a[0] + (b[0] - a[0]) * t, y = a[1] + (b[1] - a[1]) * t;
+      // outward normal: away from the middle of the hexagon
+      let nx = x - cx, ny = y - cy;
+      const n = Math.hypot(nx, ny) || 1;
+      nx /= n; ny /= n;
+      const inside = lum(x - nx * reach, y - ny * reach);
+      const outside = lum(x + nx * reach, y + ny * reach);
+      const edge = lum(x, y);
+      if (inside === null || outside === null || edge === null) continue;
+      // on the cube's edge the rim is dark and the two sides differ
+      const step = Math.abs(inside - outside) / 255;
+      const rim = Math.max(0, (Math.min(inside, outside) - edge) / 120);
+      sum += Math.min(1, 0.5 * step + rim);
+      count++;
+    }
+  }
+  return count ? sum / count : 0;
+}
+
+// One single measure of how good a grid is, so that grids produced by
+// different methods can actually be compared. Mixing two formulas (as this
+// did) lets the worse fit win.
+export function gridQuality(centers, blobs, cell, data, w, h, handles) {
+  const q = gridScore(centers, blobs, cell);
+  const lines = data ? lineScore(centers, data, w, h, cell) : 0;
+  const foot = footprintOverlap(centers, blobs, cell);
+  const border = handles && data ? borderScore(handles, data, w, h, cell) : 0;
+  return {
+    patches: q.score, matched: q.matched, unexplained: q.unexplained, lines, foot, border,
+    // The border term was tried with weight and made real photos worse, so it
+    // only breaks ties between grids that the rest scores alike.
+    score: 0.3 * q.score + 0.34 * lines + 0.34 * foot + 0.02 * border,
+  };
+}
+
 // Quality of a fitted grid. Counting matched stickers is not enough: a grid
 // shifted by one cell also lands on patches. So patches that sit next to the
 // cube and are left unexplained count against it, which pins the grid down.
@@ -793,9 +849,7 @@ export function fitFromSilhouette(model, blobs, w, h, data) {
   const evaluate = (hs) => {
     const centers = centersFromHandles(model, hs);
     if (centers.some((c) => !isFinite(c[0]) || !isFinite(c[1]))) return -1;
-    const q = gridScore(centers, blobs, cell);
-    const lines = data ? lineScore(centers, data, w, h, cell) : 0;
-    return 0.4 * q.score + 0.6 * lines;
+    return gridQuality(centers, blobs, cell, data, w, h, hs).score;
   };
   let score = evaluate(handles);
   let step = cell * 0.4;
@@ -812,13 +866,11 @@ export function fitFromSilhouette(model, blobs, w, h, data) {
     if (!improved) step *= 0.55;
   }
   const centers = centersFromHandles(model, handles);
-  const q = gridScore(centers, blobs, cell);
-  const lines = data ? lineScore(centers, data, w, h, cell) : 0;
-  const foot = footprintOverlap(centers, blobs, cell);
+  const q = gridQuality(centers, blobs, cell, data, w, h, handles);
   return {
     handles, centers, cell, stickers: visibleStickers(model),
-    hits: q.matched, unexplained: q.unexplained, lines, foot, patches: q.score,
-    score: 0.3 * q.score + 0.35 * lines + 0.35 * foot,
+    hits: q.matched, unexplained: q.unexplained, lines: q.lines, foot: q.foot,
+    patches: q.patches, score: q.score,
   };
 }
 
@@ -994,7 +1046,10 @@ export class Tracker {
     }
     return out;
   }
-  get done() { return this.locked.size === 27 && !!this.lastFit && this.lastFit.score >= 0.75; }
+  // Only a grid that really lines up may finish the job. On rendered cubes a
+  // good fit scores 0.93 to 0.99; the grids that read the wrong colours on
+  // real photos sat between 0.58 and 0.81, so the bar goes above them.
+  get done() { return this.locked.size === 27 && !!this.lastFit && this.lastFit.score >= 0.9; }
   get missing() {
     return this.lastFit
       ? this.lastFit.stickers.map((s) => s.key).filter((k) => !this.locked.has(k))
@@ -1061,7 +1116,14 @@ export class Tracker {
         }
       }
     }
-    if (!fit) this.blockHint = null;   // lost it: search the widths again
+    // Sticking to the method that worked is what keeps this cheap. When the
+    // grid only half fits we do look again at all of them, but every few
+    // frames rather than every one, or the preview crawls.
+    this.sinceSearch = (this.sinceSearch || 0) + 1;
+    if (!fit || (fit.score < 0.85 && this.sinceSearch >= 4)) {
+      this.blockHint = null;
+      this.sinceSearch = 0;
+    }
     this.lastFit = fit;
     if (!fit || fit.score < 0.3) {
       return { blobs: blobs.length, fit: null, read: this.read, message: blobs.length < 8
@@ -1086,7 +1148,7 @@ export class Tracker {
     this.lastAngle = angle;
     this.pose = { P: fit.P };
     this.handles = fit.handles;
-    this.goodFrames = fit.score >= 0.7 ? this.goodFrames + 1 : 0;
+    this.goodFrames = fit.score >= 0.85 ? this.goodFrames + 1 : 0;
     const centers = fit.stickers.map((s, i) => ({ key: s.key, xy: fit.centers[i] }));
     const tol = fit.cell * 0.5;
     const before = this.read;
@@ -1107,7 +1169,7 @@ export class Tracker {
       let rgb = null, fromPatch = false;
       if (best && bestD <= tol && best.size > fit.cell * 0.35 && best.size < fit.cell * 1.6) {
         rgb = best.rgb;
-      } else if (this.goodFrames >= 2 && fit.score >= 0.8) {
+      } else if (this.goodFrames >= 2 && fit.score >= 0.9) {
         // No patch here (glare, a shadow, two stickers merged): read the pixels
         // under the grid instead. Only when the grid really is trustworthy:
         // filling from a grid that does not line up invents colours and,
@@ -1144,7 +1206,9 @@ export class Tracker {
     this.stuck = read > before ? 0 : this.stuck + 1;
     return {
       blobs: blobs.length, fit, read, centers, stuck: this.stuck,
-      message: read === 27 ? "¡Las 27 leídas!" : this.advice(read),
+      message: read === 27
+        ? (this.done ? "¡Las 27 leídas!" : "27 leídas · comprobando que la cuadrícula encaja")
+        : this.advice(read),
     };
   }
 

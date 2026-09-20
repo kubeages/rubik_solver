@@ -20,6 +20,7 @@ const STALL_FRAMES = 18;   // ~3 s without progress: finish with what we have
 const SEARCH_FRAMES = 30;  // ~5 s without finding the cube: ask for a hand
 const POOR_FRAMES = 48;    // ~8 s of a grid that never lines up: same
 const NO_PROGRESS_FRAMES = 60;  // ~10 s stuck short of 27: same
+const PATIENCE_MS = 16000;      // do not keep anyone waiting longer than this
 
 // ---------------------------------------------------------------------------
 // geometry helpers
@@ -419,6 +420,7 @@ export class Capture {
     this._stopLiveCheck();
     this._searching = 0;
     this._poor = 0;
+    this._startedAt = Date.now();
     this._lockedScale = null;
     this.tracker = new Tracker(this.model);
     this.onFrame({ read: 0, colors: new Map(), view: this.view, faces: { top: 0, left: 0, right: 0 } });
@@ -475,7 +477,7 @@ export class Capture {
     }
     // If a few stickers refuse to settle (a highlight, a shadow), do not wait
     // for ever: once the grid is solid, read the stragglers off it and go.
-    const stalled = res.fit && res.fit.score >= 0.8 && this.tracker.read >= 18 && res.stuck >= STALL_FRAMES;
+    const stalled = res.fit && res.fit.score >= 0.9 && this.tracker.read >= 18 && res.stuck >= STALL_FRAMES;
     if (stalled) this._filled = this.tracker.fillFrom(data, sw, sh);
     this.onFrame({
       read: this.tracker.read, colors: this.tracker.locked, view: this.view,
@@ -488,10 +490,12 @@ export class Capture {
     // backlight, a very soft picture. Rather than leave the user turning the
     // cube for ever, freeze the frame and let them place the grid by hand.
     this._searching = res.fit ? 0 : (this._searching || 0) + 1;
-    const poorFit = res.weak || (res.fit && res.fit.score < 0.75);
+    const poorFit = res.weak || (res.fit && res.fit.score < 0.88);
     this._poor = poorFit && (res.stuck || 0) > 6 ? (this._poor || 0) + 1 : 0;
     const noProgress = this.tracker.read < 27 && (res.stuck || 0) >= NO_PROGRESS_FRAMES;
-    if (this.auto && (this._searching >= SEARCH_FRAMES || this._poor >= POOR_FRAMES || noProgress)) {
+    const outOfPatience = Date.now() - (this._startedAt || Date.now()) > PATIENCE_MS;
+    if (this.auto && (this._searching >= SEARCH_FRAMES || this._poor >= POOR_FRAMES ||
+                      noProgress || outOfPatience)) {
       this.handOver();
       return "captured";
     }
