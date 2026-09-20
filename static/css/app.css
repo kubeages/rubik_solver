@@ -142,6 +142,15 @@ p { margin: 0 0 .8em; }
 .capture-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0 4px; }
 .capture-guide { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; align-self: start; }
 .capture-guide svg { width: 100%; max-width: 220px; display: block; margin: 0 auto 12px; }
+.capture-preview {
+  width: 100%; aspect-ratio: 1 / 1; max-height: 220px; margin-bottom: 10px;
+  background: var(--surface-2); border-radius: 10px; overflow: hidden;
+}
+.capture-preview canvas { display: block; width: 100% !important; height: 100% !important; }
+.read-count {
+  font-size: .78rem; font-weight: 600; color: var(--accent); background: var(--accent-soft);
+  padding: 2px 8px; border-radius: 999px; margin-left: 6px; vertical-align: 1px;
+}
 .guide-list { padding-left: 18px; color: var(--ink-2); font-size: .92rem; }
 .guide-list li { margin-bottom: 8px; }
 .handle { fill: var(--accent); stroke: #fff; stroke-width: 2; cursor: grab; }

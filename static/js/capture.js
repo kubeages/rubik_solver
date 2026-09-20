@@ -307,11 +307,12 @@ export const VIEW2_COUNT = VIEW2_ROTATIONS.length;
 // ---------------------------------------------------------------------------
 
 export class Capture {
-  constructor(model, els, { onDone, onCancel }) {
+  constructor(model, els, { onDone, onCancel, onFrame }) {
     this.model = model;
     this.els = els;
     this.onDone = onDone;
     this.onCancel = onCancel;
+    this.onFrame = onFrame || (() => {});
     this.view = 0;
     this.viewColors = [null, null];
     this.viewSamples = [null, null];
@@ -417,6 +418,7 @@ export class Capture {
     this._searching = 0;
     this._lockedScale = null;
     this.tracker = new Tracker(this.model);
+    this.onFrame({ read: 0, colors: new Map(), view: this.view });
     const tick = () => {
       this._liveTimer = null;
       if (this._checkFrame() === "captured") return;
@@ -472,6 +474,7 @@ export class Capture {
     // for ever: once the grid is solid, read the stragglers off it and go.
     const stalled = res.fit && res.fit.score >= 0.5 && this.tracker.read >= 18 && res.stuck >= STALL_FRAMES;
     if (stalled) this._filled = this.tracker.fillFrom(data, sw, sh);
+    this.onFrame({ read: this.tracker.read, colors: this.tracker.locked, view: this.view });
     this._showQuality(res, stalled ? 0 : Math.max(0, STALL_FRAMES - (res.stuck || 0)));
     this._renderOverlay({ interactive: false });
     if (this.auto && this.tracker.done) {
@@ -619,6 +622,7 @@ export class Capture {
       if (found) {
         this._doubtful = found.doubtful;
         this._accumulated = found.colors;
+        this.onFrame({ read: found.read, colors: new Map(Object.entries(found.colors)), view: this.view });
         this.manualEdit = false;
         this.samples = { ...this.samples, ...found.colors };
         this._renderOverlay({ interactive: true });

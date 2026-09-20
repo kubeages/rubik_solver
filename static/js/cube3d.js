@@ -105,11 +105,16 @@ export class Cube3D {
     });
   }
 
+  // Each entry is a palette key ("W"), a css colour ("#3a3a3a") or an rgb
+  // triple straight from the camera.
   setColors(colors) {
     this.colors = colors.slice();
     colors.forEach((c, i) => {
-      const hex = COLORS[c] ? COLORS[c].hex : "#777777";
-      this.stickerMeshes[i].material.color.set(hex);
+      let value = "#777777";
+      if (Array.isArray(c)) value = `rgb(${c.map((v) => Math.round(v)).join(",")})`;
+      else if (typeof c === "string" && c.startsWith("#")) value = c;
+      else if (COLORS[c]) value = COLORS[c].hex;
+      this.stickerMeshes[i].material.color.set(value);
     });
   }
 

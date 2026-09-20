@@ -750,6 +750,78 @@ export function latticeSeeds(model, blobs) {
   return seeds;
 }
 
+// Sticker centres by interpolating inside the cube's silhouette.
+export function centersFromHandles(model, handles) {
+  return stickerCenters(model, handles).map((c) => c.xy);
+}
+
+// Fit from the silhouette rather than from the patch centres.
+//
+// The outline of a cube seen from a corner is a hexagon, and under a parallel
+// projection its centre is exactly the near corner. Taking the six vertices
+// as the extreme patches in six directions, and the near corner as the middle,
+// places the grid far better than fitting a camera to patch centres: the
+// outline is the one thing a cube always shows clearly.
+export function fitFromSilhouette(model, blobs, w, h, data) {
+  if (blobs.length < 9) return null;
+  const cx = blobs.reduce((a, b) => a + b.cx, 0) / blobs.length;
+  const cy = blobs.reduce((a, b) => a + b.cy, 0) / blobs.length;
+  const sizes = blobs.map((b) => b.size).sort((a, b) => a - b);
+  const cell = sizes[sizes.length >> 1] * 1.15;
+  let hex = null, bestReach = -Infinity;
+  for (let deg = 0; deg < 60; deg += 2) {
+    const verts = [0, 1, 2, 3, 4, 5].map((k) => {
+      const a = ((deg + k * 60) * Math.PI) / 180;
+      let far = null, reach = -Infinity;
+      for (const b of blobs) {
+        const v = (b.cx - cx) * Math.cos(a) + (b.cy - cy) * Math.sin(a);
+        if (v > reach) { reach = v; far = b; }
+      }
+      return { xy: [far.cx + Math.cos(a) * cell * 0.62, far.cy + Math.sin(a) * cell * 0.62], reach };
+    });
+    const total = verts.reduce((acc, v) => acc + v.reach, 0);
+    if (total > bestReach) { bestReach = total; hex = verts.map((v) => v.xy); }
+  }
+  if (!hex) return null;
+  // the topmost vertex is the top of the hexagon; the rest follow clockwise
+  const top = hex.map((p, i) => [p[1], i]).sort((a, b) => a[0] - b[0])[0][1];
+  const names = ["T", "UR", "LR", "B", "LL", "UL"];
+  const handles = { C: [cx, cy] };
+  for (let k = 0; k < 6; k++) handles[names[k]] = hex[(top + k) % 6];
+
+  // let the seven corners settle where the grid explains the picture best
+  const evaluate = (hs) => {
+    const centers = centersFromHandles(model, hs);
+    if (centers.some((c) => !isFinite(c[0]) || !isFinite(c[1]))) return -1;
+    const q = gridScore(centers, blobs, cell);
+    const lines = data ? lineScore(centers, data, w, h, cell) : 0;
+    return 0.4 * q.score + 0.6 * lines;
+  };
+  let score = evaluate(handles);
+  let step = cell * 0.4;
+  for (let round = 0; round < 7; round++) {
+    let improved = false;
+    for (const name of Object.keys(handles)) {
+      for (const axis of [0, 1]) for (const dir of [1, -1]) {
+        const cand = JSON.parse(JSON.stringify(handles));
+        cand[name][axis] += dir * step;
+        const sc = evaluate(cand);
+        if (sc > score + 1e-4) { Object.assign(handles, cand); score = sc; improved = true; }
+      }
+    }
+    if (!improved) step *= 0.55;
+  }
+  const centers = centersFromHandles(model, handles);
+  const q = gridScore(centers, blobs, cell);
+  const lines = data ? lineScore(centers, data, w, h, cell) : 0;
+  const foot = footprintOverlap(centers, blobs, cell);
+  return {
+    handles, centers, cell, stickers: visibleStickers(model),
+    hits: q.matched, unexplained: q.unexplained, lines, foot, patches: q.score,
+    score: 0.3 * q.score + 0.35 * lines + 0.35 * foot,
+  };
+}
+
 export function fitCube(model, blobs, w, h, start, data) {
   if (blobs.length < 9) return null;
   const seed = clusterSeed(blobs);
@@ -964,11 +1036,15 @@ export class Tracker {
       if (source.blobs.length < 9) continue;
       const onLattice = latticeCluster(source.blobs);
       if (onLattice.length < 9) continue;
-      const candidate = fitCube(this.model, onLattice, w, h, this.pose, shapes);
-      if (candidate && (!fit || candidate.score > fit.score)) {
-        fit = candidate;
-        blobs = onLattice;
-        this.blockHint = source.key;
+      for (const candidate of [
+        fitFromSilhouette(this.model, onLattice, w, h, shapes),
+        fitCube(this.model, onLattice, w, h, this.pose, shapes),
+      ]) {
+        if (candidate && (!fit || candidate.score > fit.score)) {
+          fit = candidate;
+          blobs = onLattice;
+          this.blockHint = source.key;
+        }
       }
     }
     if (!fit) this.blockHint = null;   // lost it: search the widths again

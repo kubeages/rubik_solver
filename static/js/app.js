@@ -175,12 +175,45 @@ function initCapture() {
       openReview({ fromPhotos: true });
     },
     onCancel: () => show(app.plan ? "solve" : "home"),
+    onFrame: (state) => updateCapturePreview(state),
   });
 }
 
 function startCapture(mode) {
   show("capture");
   app.captureCtl.begin(mode);
+  ensureCapturePreview();
+}
+
+// A cube next to the camera showing, live, the stickers already read. The
+// three faces being shown to the camera are always painted on the same three
+// faces of this cube, so it mirrors what the user is holding.
+async function ensureCapturePreview() {
+  if (app.preview || app.previewFailed) return;
+  try {
+    const { Cube3D } = await import("./cube3d.js");
+    app.preview = new Cube3D($("capture-preview"), app.model);
+    app.preview.controls.enableZoom = false;
+    app.preview.camera.position.set(4.6, 4.1, 6.4);
+    app.preview.setColors(new Array(54).fill(UNREAD));
+  } catch (e) {
+    app.previewFailed = true;
+  }
+}
+
+const UNREAD = "#33343a";
+
+function updateCapturePreview({ read, colors }) {
+  const badge = $("preview-count");
+  if (badge) badge.textContent = `${read} de 27`;
+  if (!app.preview) return;
+  const faces = new Array(54).fill(UNREAD);
+  app.model.stickers.forEach(({ pos, normal }, i) => {
+    if (!normal.some((v) => v === 1)) return;          // hidden in this view
+    const rgb = colors.get(`${pos.join(",")}|${normal.join(",")}`);
+    if (rgb) faces[i] = rgb;
+  });
+  app.preview.setColors(faces);
 }
 
 // ---------------------------------------------------------------------------
