@@ -203,17 +203,24 @@ async function ensureCapturePreview() {
 
 const UNREAD = "#33343a";
 
-function updateCapturePreview({ read, colors }) {
+function updateCapturePreview({ read, colors, faces }) {
   const badge = $("preview-count");
   if (badge) badge.textContent = `${read} de 27`;
+  if (faces) {
+    for (const chip of $("face-progress").children) {
+      const n = faces[chip.dataset.face] || 0;
+      chip.querySelector("b").textContent = `${n}/9`;
+      chip.classList.toggle("done", n === 9);
+    }
+  }
   if (!app.preview) return;
-  const faces = new Array(54).fill(UNREAD);
+  const painted = new Array(54).fill(UNREAD);
   app.model.stickers.forEach(({ pos, normal }, i) => {
     if (!normal.some((v) => v === 1)) return;          // hidden in this view
     const rgb = colors.get(`${pos.join(",")}|${normal.join(",")}`);
-    if (rgb) faces[i] = rgb;
+    if (rgb) painted[i] = rgb;
   });
-  app.preview.setColors(faces);
+  app.preview.setColors(painted);
 }
 
 // ---------------------------------------------------------------------------

@@ -160,11 +160,16 @@ export const INFO = {
       <p>Hacen falta <b>dos fotos</b>: cada una muestra tres caras, y entre las dos se ven las seis.</p>
       <h4>Se dispara sola</h4>
       <ul>
+        <li><b>Ve girando el cubo muy poco a poco.</b> No hace falta una postura perfecta: cada
+        ángulo nuevo deja leer unas cuantas pegatinas más, y se van acumulando. El cubo de al lado
+        te enseña cuáles llevas y los recuadros marcan cuántas van de cada cara.</li>
         <li>La aplicación <b>busca las pegatinas</b> en la imagen, estén donde estén: no tienes que
         encajar el cubo en ninguna guía. Cuando lo encuentra, dibuja su contorno en verde.</li>
         <li>Cada pegatina que consigue leer se marca con un círculo de su color. Las que aún no ha
         leído se quedan huecas.</li>
-        <li>La barra cuenta cuántas lleva. <b>Al llegar a 27 hace la foto sola.</b></li>
+        <li>La barra cuenta cuántas lleva. <b>Al llegar a 27 hace la foto sola</b>, siempre que la
+        cuadrícula esté bien encajada: si no lo está, te lo dice en vez de dar por buenos colores
+        que no ha leído bien.</li>
         <li>Si alguna se resiste (un brillo, una sombra), mueve un poco el cubo o cambia el ángulo:
         cada pegatina se da por buena cuando se lee varias veces con el mismo color.</li>
         <li>Si prefieres disparar tú, quita «Captura automática» y usa «Capturar ahora».</li>

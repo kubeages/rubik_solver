@@ -975,12 +975,26 @@ export class Tracker {
     this.blockHint = null;
     this.handles = null;
     this.lastFit = null;
+    this.lastAngle = null;
+    this.turned = 0;
     this.stuck = 0;             // frames since the count last went up
   }
 
   get total() { return 27; }
   get read() { return this.locked.size; }
-  get done() { return this.locked.size === 27; }
+
+  // How many stickers are settled on each of the three faces on show.
+  faceProgress() {
+    const out = { top: 0, left: 0, right: 0 };
+    for (const key of this.locked.keys()) {
+      const normal = key.split("|")[1];
+      if (normal === "0,1,0") out.top++;
+      else if (normal === "0,0,1") out.left++;
+      else if (normal === "1,0,0") out.right++;
+    }
+    return out;
+  }
+  get done() { return this.locked.size === 27 && !!this.lastFit && this.lastFit.score >= 0.75; }
   get missing() {
     return this.lastFit
       ? this.lastFit.stickers.map((s) => s.key).filter((k) => !this.locked.has(k))
@@ -1054,17 +1068,35 @@ export class Tracker {
         ? "Enfoca el cubo: acércalo o busca más luz"
         : "Buscando el cubo…" };
     }
+    // Turning the cube a little is good: more angles, more stickers read. But
+    // turning it a third of a turn about the corner swaps which face is which,
+    // and readings from before would then belong to another face.
+    const angle = Math.atan2(fit.handles.T[1] - fit.handles.C[1], fit.handles.T[0] - fit.handles.C[0]);
+    if (this.lastAngle !== null && this.lastAngle !== undefined) {
+      let turn = Math.abs(angle - this.lastAngle);
+      if (turn > Math.PI) turn = 2 * Math.PI - turn;
+      if (turn > 0.7) {                       // about 40 degrees
+        this.votes.clear();
+        this.locked.clear();
+        this.guessed.clear();
+        this.doubts.clear();
+        this.turned = (this.turned || 0) + 1;
+      }
+    }
+    this.lastAngle = angle;
     this.pose = { P: fit.P };
     this.handles = fit.handles;
-    this.goodFrames = fit.score >= 0.5 ? this.goodFrames + 1 : 0;
+    this.goodFrames = fit.score >= 0.7 ? this.goodFrames + 1 : 0;
     const centers = fit.stickers.map((s, i) => ({ key: s.key, xy: fit.centers[i] }));
     const tol = fit.cell * 0.5;
     const before = this.read;
-    if (fit.score < 0.42) {
-      // the grid is not solid enough to trust what is under it
+    if (fit.score < 0.55) {
+      // the grid does not line up well enough to trust what is under it
       this.stuck = this.stuck + 1;
-      return { blobs: blobs.length, fit, read: this.read, centers, stuck: this.stuck,
-               message: `Leídas ${this.read} de 27 · sujeta el cubo un poco más quieto` };
+      return {
+        blobs: blobs.length, fit, read: this.read, centers, stuck: this.stuck, weak: true,
+        message: `La cuadrícula no acaba de encajar · gira el cubo despacio o pulsa «Ajustar a mano»`,
+      };
     }
     for (const c of centers) {
       let best = null, bestD = Infinity;
@@ -1075,9 +1107,11 @@ export class Tracker {
       let rgb = null, fromPatch = false;
       if (best && bestD <= tol && best.size > fit.cell * 0.35 && best.size < fit.cell * 1.6) {
         rgb = best.rgb;
-      } else if (this.goodFrames >= 1 && fit.score >= 0.45) {
-        // no patch here (glare, a shadow, two stickers merged): read the pixels
-        // under the grid instead, now that we trust where the grid is
+      } else if (this.goodFrames >= 2 && fit.score >= 0.8) {
+        // No patch here (glare, a shadow, two stickers merged): read the pixels
+        // under the grid instead. Only when the grid really is trustworthy:
+        // filling from a grid that does not line up invents colours and,
+        // worse, reports success.
         rgb = patchColor(data, w, h, c.xy[0], c.xy[1], Math.max(1, fit.cell * 0.18));
         fromPatch = true;
       }
@@ -1110,10 +1144,19 @@ export class Tracker {
     this.stuck = read > before ? 0 : this.stuck + 1;
     return {
       blobs: blobs.length, fit, read, centers, stuck: this.stuck,
-      message: read === 27
-        ? "¡Las 27 leídas!"
-        : `Leídas ${read} de 27 · gira un poco el cubo o cambia el ángulo`,
+      message: read === 27 ? "¡Las 27 leídas!" : this.advice(read),
     };
+  }
+
+  // What the user should do next, in terms of the cube in their hand.
+  advice(read) {
+    const p = this.faceProgress();
+    const worst = Object.entries(p).sort((a, b) => a[1] - b[1])[0];
+    const names = { top: "de arriba", left: "de delante", right: "de la derecha" };
+    if (worst[1] < 9) {
+      return `Leídas ${read} de 27 · gira despacio para que se vea mejor la cara ${names[worst[0]]} (${worst[1]} de 9)`;
+    }
+    return `Leídas ${read} de 27 · gira el cubo muy poco a poco`;
   }
 
   colors() {

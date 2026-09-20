@@ -18,6 +18,8 @@ const VEC_HANDLE = Object.fromEntries(Object.entries(HANDLE_VEC).map(([k, v]) =>
 const HANDLE_ANGLE = { T: -90, UR: -30, LR: 30, B: 90, LL: 150, UL: 210 };
 const STALL_FRAMES = 18;   // ~3 s without progress: finish with what we have
 const SEARCH_FRAMES = 30;  // ~5 s without finding the cube: ask for a hand
+const POOR_FRAMES = 48;    // ~8 s of a grid that never lines up: same
+const NO_PROGRESS_FRAMES = 60;  // ~10 s stuck short of 27: same
 
 // ---------------------------------------------------------------------------
 // geometry helpers
@@ -416,9 +418,10 @@ export class Capture {
   _startLiveCheck() {
     this._stopLiveCheck();
     this._searching = 0;
+    this._poor = 0;
     this._lockedScale = null;
     this.tracker = new Tracker(this.model);
-    this.onFrame({ read: 0, colors: new Map(), view: this.view });
+    this.onFrame({ read: 0, colors: new Map(), view: this.view, faces: { top: 0, left: 0, right: 0 } });
     const tick = () => {
       this._liveTimer = null;
       if (this._checkFrame() === "captured") return;
@@ -472,11 +475,27 @@ export class Capture {
     }
     // If a few stickers refuse to settle (a highlight, a shadow), do not wait
     // for ever: once the grid is solid, read the stragglers off it and go.
-    const stalled = res.fit && res.fit.score >= 0.5 && this.tracker.read >= 18 && res.stuck >= STALL_FRAMES;
+    const stalled = res.fit && res.fit.score >= 0.8 && this.tracker.read >= 18 && res.stuck >= STALL_FRAMES;
     if (stalled) this._filled = this.tracker.fillFrom(data, sw, sh);
-    this.onFrame({ read: this.tracker.read, colors: this.tracker.locked, view: this.view });
+    this.onFrame({
+      read: this.tracker.read, colors: this.tracker.locked, view: this.view,
+      faces: this.tracker.faceProgress(),
+    });
     this._showQuality(res, stalled ? 0 : Math.max(0, STALL_FRAMES - (res.stuck || 0)));
     this._renderOverlay({ interactive: false });
+
+    // Some scenes defeat the detector: a cube far from the camera, strong
+    // backlight, a very soft picture. Rather than leave the user turning the
+    // cube for ever, freeze the frame and let them place the grid by hand.
+    this._searching = res.fit ? 0 : (this._searching || 0) + 1;
+    const poorFit = res.weak || (res.fit && res.fit.score < 0.75);
+    this._poor = poorFit && (res.stuck || 0) > 6 ? (this._poor || 0) + 1 : 0;
+    const noProgress = this.tracker.read < 27 && (res.stuck || 0) >= NO_PROGRESS_FRAMES;
+    if (this.auto && (this._searching >= SEARCH_FRAMES || this._poor >= POOR_FRAMES || noProgress)) {
+      this.handOver();
+      return "captured";
+    }
+
     if (this.auto && this.tracker.done) {
       this._flash();
       this.shoot();
@@ -501,9 +520,12 @@ export class Capture {
       this.samples = { ...this.samples, ...found.colors };
       this._renderOverlay({ interactive: true });
     }
+    const read = this.tracker ? this.tracker.read : 0;
     this.els.hint.textContent = (onRequest
       ? "Coloca la cuadrícula tú mismo: "
-      : "No consigo encontrar el cubo solo en esta escena. ") +
+      : read
+        ? `He leído ${read} de 27 pegatinas, pero la cuadrícula no acaba de encajar. `
+        : "No consigo encontrar el cubo solo en esta escena. ") +
       "arrastra los 7 puntos azules hasta las esquinas del cubo (el del centro, a la esquina que " +
       "apunta hacia ti). Los círculos muestran el color que lee cada pegatina.";
   }
@@ -519,6 +541,12 @@ export class Capture {
     if (!res.fit && this._searching > 12) {
       const left = Math.ceil((SEARCH_FRAMES - this._searching) / 6);
       msg = `Buscando el cubo… acércalo a la cámara (en ${left} s lo ajustamos a mano)`;
+    } else if (this._poor > 30) {
+      const left = Math.ceil((POOR_FRAMES - this._poor) / 6);
+      msg = `La cuadrícula no encaja · gira el cubo (en ${left} s lo ajustamos a mano)`;
+    } else if (read < 27 && (res.stuck || 0) > NO_PROGRESS_FRAMES - 36) {
+      const left = Math.ceil((NO_PROGRESS_FRAMES - res.stuck) / 6);
+      msg = `${res.message} (en ${left} s lo ajustamos a mano)`;
     }
     if (read >= 20 && read < 27 && countdown !== null && countdown <= 12) {
       msg = `Leídas ${read} de 27 · si no avanza, capturo con lo que hay`;
