@@ -211,6 +211,7 @@ function ensureFaceScan() {
   }, {
     onDone: (faces) => {
       app.orientedFaces = 0;
+      app.rearranged = 0;
       app.colors = facesToColors(faces);
       app.capture = null;
       app.doubtful = new Set();
@@ -257,14 +258,23 @@ function turnFace(nine) {
 // centres do not move, so the colours themselves are never in question.
 function orientFaces(read) {
   const faces = "URFDLB".split("").map((_, k) => read.slice(k * 9, k * 9 + 9));
+  // Turning the cube the other way round swaps left and right, and tilting
+  // it the other way swaps top and bottom. Neither can be undone by rotating
+  // faces, so both are tried as well.
+  const arrangements = [
+    [0, 1, 2, 3, 4, 5],          // as asked for
+    [0, 4, 2, 3, 1, 5],          // the four sides turned the other way
+    [3, 1, 2, 0, 4, 5],          // top and bottom the other way round
+    [3, 4, 2, 0, 1, 5],          // both
+  ];
   const variants = faces.map((nine) => {
     const list = [nine];
     for (let i = 0; i < 3; i++) list.push(turnFace(list[list.length - 1]));
     return list;
   });
-  const build = (turns) => {
+  const build = (turns, order) => {
     const out = [];
-    for (let k = 0; k < 6; k++) out.push(...variants[k][turns[k]]);
+    for (let k = 0; k < 6; k++) out.push(...variants[order[k]][turns[k]]);
     return out;
   };
   if (app.model.isValid(read)) return read;
@@ -278,11 +288,13 @@ function orientFaces(read) {
   }
   options.sort((x, y) => x[0] - y[0]);
   for (const [, turns] of options) {
-    const candidate = build(turns);
-    if (app.model.isValid(candidate)) {
-      const moved = turns.filter((t) => t).length;
-      app.orientedFaces = moved;
-      return candidate;
+    for (let a = 0; a < arrangements.length; a++) {
+      const candidate = build(turns, arrangements[a]);
+      if (app.model.isValid(candidate)) {
+        app.orientedFaces = turns.filter((t) => t).length;
+        app.rearranged = a;
+        return candidate;
+      }
     }
   }
   return read;           // nothing fits: the review screen will say so
@@ -397,7 +409,8 @@ function renderNet() {
       const idx = 9 * k + i;
       const b = document.createElement("button");
       const doubt = app.doubtful && app.doubtful.has(idx);
-      b.className = "net-cell" + (i === 4 ? " center" : "") + (doubt ? " doubt" : "");
+      const guilty = app.guilty && app.guilty.has(idx);
+      b.className = "net-cell" + (i === 4 ? " center" : "") + (doubt ? " doubt" : "") + (guilty ? " bad" : "");
       if (doubt) b.title += " · leída con dudas, compruébala";
       b.style.background = COLORS[app.colors[idx]] ? COLORS[app.colors[idx]].hex : "#666";
       b.title = `${f}${i + 1}`;
@@ -429,6 +442,7 @@ async function runValidate() {
     return;
   }
   const facelets = app.model.toFacelets(app.colors);
+  app.guilty = new Set();
   try {
     const r = await api("/api/validate", { facelets });
     if (r.ok && r.solved) {
@@ -437,8 +451,13 @@ async function runValidate() {
     } else if (r.ok) {
       st.className = "review-status ok";
       const doubts = app.doubtful ? app.doubtful.size : 0;
-      if (app.orientedFaces) {
-        st.textContent = `✓ Es un cubo válido. ${app.orientedFaces === 1 ? "Una cara estaba girada" : `${app.orientedFaces} caras estaban giradas`} respecto al orden que te pedí, y lo he corregido solo.`;
+      if (app.orientedFaces || app.rearranged) {
+        const parts = [];
+        if (app.orientedFaces) {
+          parts.push(app.orientedFaces === 1 ? "una cara estaba girada" : `${app.orientedFaces} caras estaban giradas`);
+        }
+        if (app.rearranged) parts.push("giraste el cubo en otro sentido del que te pedí");
+        st.textContent = `✓ Es un cubo válido. Lo he corregido solo: ${parts.join(" y ")}.`;
         $("btn-solve").disabled = false;
         renderBasePicker();
         return;
@@ -450,12 +469,29 @@ async function runValidate() {
     } else {
       st.className = "review-status err";
       st.textContent = r.error;
+      markGuilty(r.error);
     }
   } catch (e) {
     st.className = "review-status err";
     st.textContent = e.message;
   }
   renderBasePicker();
+}
+
+// The server names the piece it cannot make sense of; show which stickers
+// those are, so there is somewhere to look.
+function markGuilty(error) {
+  app.guilty = new Set();
+  const corner = (error.match(/esquina ([A-Z]{3})/) || [])[1];
+  const edge = (error.match(/arista ([A-Z]{2})/) || [])[1];
+  if (corner) {
+    const i = app.meta.corner_names.indexOf(corner);
+    if (i >= 0) app.meta.corner_facelets[i].forEach((f) => app.guilty.add(f));
+  } else if (edge) {
+    const i = app.meta.edge_names.indexOf(edge);
+    if (i >= 0) app.meta.edge_facelets[i].forEach((f) => app.guilty.add(f));
+  }
+  renderNet();
 }
 
 function renderBasePicker() {

@@ -10,7 +10,8 @@ from flask import Flask, jsonify, render_template, request, session
 
 import auth
 from cube import stages, tutor, twophase
-from cube.model import (CORNER_FACELETS, EDGE_FACELETS, FACES, MOVE_PERMS, MOVES, SOLVED, STICKERS, InvalidCube,
+from cube.model import (CORNER_FACELETS, CORNER_NAMES, EDGE_FACELETS, EDGE_NAMES, FACES, MOVE_PERMS,
+                        MOVES, SOLVED, STICKERS, InvalidCube,
                         apply_moves, random_state, ring_cycles, validate)
 
 app = Flask(__name__)
@@ -59,6 +60,8 @@ def meta():
         "rings": {f: ring_cycles(f) for f in FACES},
         "corner_facelets": CORNER_FACELETS,
         "edge_facelets": EDGE_FACELETS,
+        "corner_names": CORNER_NAMES,
+        "edge_names": EDGE_NAMES,
         "stages": [s.info() for s in stages.get_stages()],
         "twophase": {
             "sizes": solver.sizes,
