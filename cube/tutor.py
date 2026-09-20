@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
+import time
 
 import requests
 
@@ -36,8 +38,62 @@ Cuidado con estas confusiones:
 No inventes movimientos distintos de los que da la aplicación y, si el contexto no te dice algo, dilo en vez de suponerlo."""
 
 
+PROBE_TTL = float(os.environ.get("VLLM_PROBE_TTL", "30"))
+PROBE_TIMEOUT = float(os.environ.get("VLLM_PROBE_TIMEOUT", "6"))
+
+_probe_lock = threading.Lock()
+_probe_cache: dict | None = None
+
+
 def enabled() -> bool:
     return bool(VLLM_URL)
+
+
+def probe(force: bool = False) -> dict:
+    """Is the LLM answering right now?  Cached briefly so a reload is cheap."""
+    global _probe_cache
+    if not enabled():
+        return {"enabled": False, "ok": False, "model": VLLM_MODEL,
+                "detail": "No hay ningún LLM configurado", "checked_at": time.time()}
+    with _probe_lock:
+        cached = _probe_cache
+        if cached and not force and time.time() - cached["checked_at"] < PROBE_TTL:
+            return cached
+    headers = {"Authorization": f"Bearer {VLLM_API_KEY}"} if VLLM_API_KEY else {}
+    started = time.monotonic()
+    result = {"enabled": True, "ok": False, "model": VLLM_MODEL, "checked_at": time.time()}
+    try:
+        resp = requests.get(f"{VLLM_URL}/models", headers=headers, timeout=PROBE_TIMEOUT)
+        result["latency_ms"] = int((time.monotonic() - started) * 1000)
+        if resp.status_code == 401 or resp.status_code == 403:
+            result["detail"] = "El LLM rechaza la clave de acceso"
+        elif not resp.ok:
+            result["detail"] = f"El LLM responde con error {resp.status_code}"
+        else:
+            names = [m.get("id") for m in resp.json().get("data", [])]
+            if names and VLLM_MODEL not in names:
+                result["detail"] = f"El LLM responde, pero no sirve el modelo {VLLM_MODEL}"
+            else:
+                result["ok"] = True
+                result["detail"] = f"Conectado · {VLLM_MODEL}"
+    except requests.Timeout:
+        result["detail"] = "El LLM no responde (tiempo agotado)"
+    except requests.RequestException:
+        result["detail"] = "No se puede conectar con el LLM"
+    except ValueError:
+        result["detail"] = "El LLM devuelve una respuesta que no se entiende"
+    if not result["ok"]:
+        log.warning("tutor no disponible: %s", result["detail"])
+    with _probe_lock:
+        _probe_cache = result
+    return result
+
+
+def invalidate_probe():
+    """Forget the cached probe, e.g. after a failed answer."""
+    global _probe_cache
+    with _probe_lock:
+        _probe_cache = None
 
 
 def ask(question: str, context: dict, history: list) -> str | None:
@@ -70,4 +126,5 @@ def ask(question: str, context: dict, history: list) -> str | None:
         return resp.json()["choices"][0]["message"]["content"].strip()
     except (requests.RequestException, KeyError, ValueError) as e:
         log.warning("tutor unavailable: %s", e)
+        invalidate_probe()
         return None

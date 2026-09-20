@@ -491,6 +491,45 @@ function tutorContext() {
   };
 }
 
+// Ask the server whether the LLM is actually answering, and show it as a light.
+async function checkTutor(force) {
+  const dot = $("tutor-dot");
+  const label = $("tutor-status");
+  if (!app.meta.tutor) {
+    dot.className = "status-dot off";
+    dot.title = "Sin LLM configurado";
+    label.textContent = "Tutor desactivado (sin LLM configurado)";
+    setTutorControls(false);
+    return false;
+  }
+  dot.className = "status-dot checking";
+  label.textContent = "Comprobando el LLM…";
+  try {
+    const s = await api("/api/tutor/status" + (force ? "?force=1" : ""));
+    const ms = s.latency_ms;
+    const took = s.ok && ms ? ` (${ms < 1000 ? ms + " ms" : (ms / 1000).toFixed(1) + " s"})` : "";
+    setTutorStatus(s.ok, s.detail + took);
+    return s.ok;
+  } catch (e) {
+    setTutorStatus(false, "No se pudo comprobar el LLM");
+    return false;
+  }
+}
+
+function setTutorStatus(ok, detail) {
+  const dot = $("tutor-dot");
+  dot.className = "status-dot " + (ok ? "ok" : "down");
+  dot.title = (ok ? "El tutor responde" : "El tutor no responde") + ": " + detail + " · pulsa para volver a comprobar";
+  $("tutor-status").textContent = detail + (ok ? "" : " · pulsa el punto para reintentar");
+  setTutorControls(ok);
+}
+
+function setTutorControls(on) {
+  $("tutor-form").querySelector("button").disabled = !on;
+  $("tutor-input").disabled = !on;
+  $("btn-explain").hidden = !on;
+}
+
 async function askTutor(question) {
   const log = $("tutor-log");
   const add = (role, text, cls = "") => {
@@ -508,8 +547,10 @@ async function askTutor(question) {
     pending.textContent = r.answer;
     pending.classList.remove("pending");
     app.tutorHistory.push({ role: "user", content: question }, { role: "assistant", content: r.answer });
+    setTutorStatus(true, "Conectado · " + (app.meta.tutor_model || "LLM"));
   } catch (e) {
     pending.textContent = "El tutor no está disponible ahora mismo. La explicación del paso sigue arriba.";
+    checkTutor(true);
   }
 }
 
@@ -572,13 +613,8 @@ async function boot() {
     askTutor(q);
   };
   $("btn-explain").onclick = () => askTutor("Explícame este paso con otras palabras: qué hago con el cubo y qué significa en el grafo.");
-  if (!app.meta.tutor) {
-    $("tutor-status").textContent = "Tutor desactivado (sin LLM configurado)";
-    $("tutor-form").querySelector("button").disabled = true;
-    $("btn-explain").hidden = true;
-  } else {
-    $("tutor-status").textContent = "Un LLM que conoce el paso en el que estás";
-  }
+  $("tutor-dot").onclick = () => { if (app.meta.tutor) checkTutor(true); };
+  checkTutor(false);
   document.addEventListener("keydown", (e) => {
     if (!$("screen-solve").classList.contains("active") || e.target.tagName === "INPUT") return;
     if (e.key === "ArrowRight" || e.key === "Enter") $("btn-done").click();

@@ -65,6 +65,7 @@ def meta():
             "phase2_moves": [MOVES[m] for m in twophase.PHASE2_MOVES],
         },
         "tutor": tutor.enabled(),
+        "tutor_model": tutor.VLLM_MODEL,
     })
 
 
@@ -160,6 +161,11 @@ def api_tutor():
     if answer is None:
         return jsonify({"error": "El tutor no está disponible ahora mismo"}), 503
     return jsonify({"answer": answer})
+
+
+@app.route("/api/tutor/status")
+def api_tutor_status():
+    return jsonify(tutor.probe(force=request.args.get("force") == "1"))
 
 
 @app.route("/healthz")
