@@ -574,7 +574,7 @@ function patchColor(data, w, h, x, y, r) {
 // ---------------------------------------------------------------------------
 
 export class Tracker {
-  constructor(model, { votes = 3, tolerance = 34 } = {}) {
+  constructor(model, { votes = 3, tolerance = 44 } = {}) {
     this.goodFrames = 0;
     this.model = model;
     this.votesNeeded = votes;
@@ -586,14 +586,35 @@ export class Tracker {
     this.goodFrames = 0;
     this.votes = new Map();     // sticker key -> [rgb, ...]
     this.locked = new Map();    // sticker key -> rgb
+    this.doubts = new Map();    // sticker key -> readings that contradict the locked colour
+    this.guessed = new Set();   // filled from a single frame, worth a second look
     this.pose = null;
     this.handles = null;
     this.lastFit = null;
+    this.stuck = 0;             // frames since the count last went up
   }
 
   get total() { return 27; }
   get read() { return this.locked.size; }
   get done() { return this.locked.size === 27; }
+  get missing() {
+    return this.lastFit
+      ? this.lastFit.stickers.map((s) => s.key).filter((k) => !this.locked.has(k))
+      : [];
+  }
+
+  // Agreement by majority, not unanimity: one bad frame (a refocus, a shake)
+  // must not block a sticker for ever.
+  _consensus(list) {
+    let best = null;
+    for (const pivot of list) {
+      const close = list.filter((v) =>
+        Math.hypot(v[0] - pivot[0], v[1] - pivot[1], v[2] - pivot[2]) < this.tolerance);
+      if (close.length >= this.votesNeeded && (!best || close.length > best.length)) best = close;
+    }
+    if (!best) return null;
+    return [0, 1, 2].map((k) => best.reduce((s, v) => s + v[k], 0) / best.length);
+  }
 
   // One frame: returns what was seen, and grows the readings.
   update(data, w, h) {
@@ -610,40 +631,82 @@ export class Tracker {
     this.goodFrames = fit.score >= 0.6 ? this.goodFrames + 1 : 0;
     const centers = fit.stickers.map((s, i) => ({ key: s.key, xy: fit.centers[i] }));
     const tol = fit.cell * 0.5;
+    const before = this.read;
+    if (fit.score < 0.55) {
+      // the grid is not solid enough to trust what is under it
+      this.stuck = this.stuck + 1;
+      return { blobs: blobs.length, fit, read: this.read, centers, stuck: this.stuck,
+               message: `Leídas ${this.read} de 27 · sujeta el cubo un poco más quieto` };
+    }
     for (const c of centers) {
       let best = null, bestD = Infinity;
       for (const b of blobs) {
         const d = Math.hypot(b.cx - c.xy[0], b.cy - c.xy[1]);
         if (d < bestD) { bestD = d; best = b; }
       }
-      let rgb = null;
+      let rgb = null, fromPatch = false;
       if (best && bestD <= tol && best.size > fit.cell * 0.35 && best.size < fit.cell * 1.6) {
         rgb = best.rgb;
-      } else if (this.goodFrames >= 2 && fit.score >= 0.62) {
+      } else if (this.goodFrames >= 1 && fit.score >= 0.55) {
         // no patch here (glare, a shadow, two stickers merged): read the pixels
         // under the grid instead, now that we trust where the grid is
         rgb = patchColor(data, w, h, c.xy[0], c.xy[1], Math.max(1, fit.cell * 0.18));
+        fromPatch = true;
       }
       if (!rgb) continue;
+      // A sticker that was locked from a bad moment must be able to change its
+      // mind: readings that keep contradicting it unlock it.
+      const held = this.locked.get(c.key);
+      if (held) {
+        const far = Math.hypot(rgb[0] - held[0], rgb[1] - held[1], rgb[2] - held[2]) > this.tolerance * 1.3;
+        const n = (this.doubts.get(c.key) || 0) + (far ? 1 : -1);
+        this.doubts.set(c.key, Math.max(0, n));
+        if (n >= 3) {
+          this.locked.delete(c.key);
+          this.votes.delete(c.key);
+          this.doubts.delete(c.key);
+          this.guessed.delete(c.key);
+        }
+      }
       const list = this.votes.get(c.key) || [];
       list.push(rgb);
-      if (list.length > 6) list.shift();
+      if (list.length > 7) list.shift();
       this.votes.set(c.key, list);
-      if (list.length >= this.votesNeeded) {
-        const mean = [0, 1, 2].map((k) => list.reduce((s, v) => s + v[k], 0) / list.length);
-        const worst = Math.max(...list.map((v) => Math.hypot(v[0] - mean[0], v[1] - mean[1], v[2] - mean[2])));
-        if (worst < this.tolerance) this.locked.set(c.key, mean);
-        else list.shift();   // readings disagree: drop the oldest and keep looking
+      const agreed = this._consensus(list);
+      if (agreed) {
+        this.locked.set(c.key, agreed);
+        this.guessed.delete(c.key);   // settled on its own: no longer a guess
       }
     }
     const read = this.read;
+    this.stuck = read > before ? 0 : this.stuck + 1;
     return {
-      blobs: blobs.length, fit, read, centers,
-      message: read === 27 ? "¡Las 27 leídas!" : `Leídas ${read} de 27 · mueve un poco el cubo si alguna se resiste`,
+      blobs: blobs.length, fit, read, centers, stuck: this.stuck,
+      message: read === 27
+        ? "¡Las 27 leídas!"
+        : `Leídas ${read} de 27 · gira un poco el cubo o cambia el ángulo`,
     };
   }
 
   colors() {
     return Object.fromEntries(this.locked);
+  }
+
+  // Finish the job from one frame: whatever is still missing is read off the
+  // grid we have. Those keys are returned so they can be flagged for review.
+  fillFrom(data, w, h) {
+    const fit = this.lastFit;
+    if (!fit) return [];
+    const filled = [];
+    fit.stickers.forEach((st, i) => {
+      if (this.locked.has(st.key)) return;
+      const xy = fit.centers[i];
+      const rgb = patchColor(data, w, h, xy[0], xy[1], Math.max(1, fit.cell * 0.18));
+      if (!rgb) return;
+      this.locked.set(st.key, rgb);
+      this.guessed.add(st.key);
+      filled.push(st.key);
+    });
+    return filled;
   }
 }

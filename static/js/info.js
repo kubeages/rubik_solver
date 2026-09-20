@@ -225,6 +225,124 @@ export const INFO = {
   },
 };
 
+// Technical facts for the tooltip: live numbers about what each box is doing.
+// `ctx` is filled in by app.js with the current plan, step and metadata.
+export function techLines(key, ctx) {
+  const { meta, plan, step, stage, mode, tutor } = ctx;
+  const n = (v) => (v === undefined || v === null ? "—" : Number(v).toLocaleString("es"));
+  switch (key) {
+    case "cube3d":
+      return [
+        ["Motor", "three.js r169 (WebGL)"],
+        ["Escena", "27 cubies · 54 pegatinas independientes"],
+        ["Animación", "giro de 90° sobre el eje de la cara; al acabar, los cubies vuelven a su sitio y se repinta el estado"],
+        ["Estado", "cadena de 54 letras (caras U R F D L B); cada giro es una permutación de esas 54 posiciones"],
+      ];
+    case "step":
+      return [
+        ["Paso", plan ? `${(ctx.index ?? 0) + 1} de ${plan.steps.length}` : "—"],
+        ["Arista", step ? `${step.label} (${step.moves.length} ${step.moves.length === 1 ? "giro" : "giros"})` : "—"],
+        ["Secuencia", step ? step.moves.join(" ") : "—"],
+        ["Distancia", step ? `${step.d_before} → ${step.d_after}` : "—"],
+        ["Total del camino", plan ? `${plan.steps.length} aristas · ${plan.move_count} giros` : "—"],
+      ];
+    case "sticker":
+      return [
+        ["Vértices", "54 (un adhesivo cada uno)"],
+        ["Ciclos por giro", "un anillo de 12 adhesivos (avanza 3) y un ciclo de 8 en la propia cara (avanza 2)"],
+        ["Proyección", "azimutal equivalente en área, centrada en la esquina que apunta a la cámara"],
+        ["Giro actual", step ? step.moves.join(" ") : "—"],
+        ["En términos de grupos", "grafo de Schreier de la acción del grupo del cubo sobre los 54 adhesivos"],
+      ];
+    case "neighbors":
+      if (mode === "learn") {
+        return [
+          ["Fase", stage ? stage.title : "—"],
+          ["Aristas por vértice", stage ? n(stage.edges_per_vertex) : "—"],
+          ["Vértices de la fase", stage ? n(stage.vertices) : "—"],
+          ["Números", "distancia exacta a la meta, precalculada con BFS desde la meta recorriendo las aristas al revés"],
+          ["Tu distancia", step ? step.d_before : "—"],
+          ["Aristas que acercan", step ? step.neighbors.filter((x) => x.d < step.d_before).length : "—"],
+        ];
+      }
+      return [
+        ["Fase", stage ? stage.title : "—"],
+        ["Aristas", step && step.stage === "phase1" ? "18 (todos los giros)" : "10 (solo los de H)"],
+        ["Números", "cota inferior admisible: máximo de dos bases de datos de patrones"],
+        ["Cota actual", step ? step.h_before : "—"],
+        ["Giros que faltan", step ? step.d_before : "—"],
+      ];
+    case "levels":
+      if (mode === "learn") {
+        return [
+          ["Grafo", stage ? `${n(stage.vertices)} vértices · ${stage.edges_per_vertex} aristas por vértice` : "—"],
+          ["Distancia máxima", stage ? stage.max_distance : "—"],
+          ["Cálculo", "BFS completo desde la meta; la distancia de cada vértice es exacta"],
+          ["Escala", "logarítmica (cada marca multiplica por diez)"],
+          ["Tu barra", step ? step.d_before : "—"],
+        ];
+      }
+      return [
+        ["Base de datos", step && step.stage === "phase1"
+          ? `giro de esquinas × aristas centrales: ${n(meta.twophase.sizes.twist_slice)} vértices`
+          : `permutación de esquinas × aristas centrales: ${n(meta.twophase.sizes.corners_slice)} vértices`],
+        ["Cálculo", "BFS completo en el grafo reducido, guardado como tabla"],
+        ["Uso", "cota inferior que nunca supera la distancia real, para podar la búsqueda IDA*"],
+        ["Tu valor", step ? step.h_before : "—"],
+      ];
+    case "path":
+      if (mode === "learn") {
+        return [
+          ["Camino", plan ? `${plan.steps.length} aristas · ${plan.move_count} giros` : "—"],
+          ["Fases", plan ? plan.stages.map((s) => s.steps).join(" + ") + " pasos" : "—"],
+          ["Altura", "distancia a la meta de la fase en curso; se reinicia al cambiar de fase"],
+          ["Método", "descenso por la función de distancia: cada arista baja exactamente 1"],
+        ];
+      }
+      return [
+        ["Camino", plan ? `${plan.move_count} giros` : "—"],
+        ["Fase 1 / Fase 2", plan ? `${plan.search.phase1_length} + ${plan.move_count - plan.search.phase1_length}` : "—"],
+        ["Vértices explorados", plan ? `${n(plan.search.nodes_phase1)} en fase 1 · ${n(plan.search.nodes_phase2)} en fase 2` : "—"],
+        ["Soluciones de fase 1 probadas", plan ? n(plan.search.phase1_solutions_tried) : "—"],
+        ["Tiempo de búsqueda", plan ? `${plan.search.time} s` : "—"],
+        ["Línea discontinua", "cota inferior; la continua son los giros que faltan de verdad"],
+      ];
+    case "tutor":
+      return [
+        ["Modelo", meta.tutor_model || "—"],
+        ["Estado", tutor || "—"],
+        ["Comprobación", "GET /v1/models con 6 s de límite, cacheada 30 s en el servidor"],
+        ["Contexto enviado", "modo, fase, objetivo, movimiento elegido, distancias y los vecinos con su distancia"],
+        ["Aviso", "el modelo puede equivocarse; los movimientos no salen de él, sino del solver"],
+      ];
+    case "capture":
+      return [
+        ["Detección", "segmentación de manchas de color uniforme + ajuste de la rejilla del cubo"],
+        ["Cámara", "ortográfica con escala (8 números), ajustada por iteraciones de emparejar y resolver"],
+        ["Desambiguación", "líneas negras entre pegatinas y huella de las manchas: una rejilla corrida una casilla también encaja"],
+        ["Resolución", "480 px de ancho para analizar; ~13 ms por fotograma en seguimiento"],
+        ["Lectura", "cada pegatina se fija cuando 3 lecturas coinciden; si una se contradice 3 veces, se suelta y se vuelve a leer"],
+      ];
+    case "review":
+      return [
+        ["Comprobaciones", "9 pegatinas por color, centros distintos, piezas sin repetir"],
+        ["Orientaciones", "suma de giros de esquinas ≡ 0 (mod 3) y de volteos de aristas ≡ 0 (mod 2)"],
+        ["Paridad", "la permutación de esquinas y la de aristas deben tener la misma paridad"],
+        ["Segunda foto", "se prueban las 3 orientaciones posibles y se elige la que da un cubo posible"],
+        ["Reparación", "si el cubo es imposible, se intercambian las pegatinas más dudosas hasta que deje de serlo"],
+      ];
+    case "mode":
+      return [
+        ["Aprendizaje", "7 fases; grafos de 24 a 190.080 vértices; BFS desde la meta; unos 100-140 giros"],
+        ["Rápido", `IDA* en G/H (${n(2217093120)} vértices) y luego dentro de H (${n(19508428800)}); 20-22 giros`],
+        ["Grafo completo", "43.252.003.274.489.856.000 posiciones, 18 aristas por vértice, diámetro 20"],
+        ["Cotas", "bases de datos de patrones calculadas con BFS y guardadas en la imagen del contenedor"],
+      ];
+    default:
+      return [];
+  }
+}
+
 export function attachInfoButtons(openInfo) {
   const targets = [
     ["cube3d", ".cube3d-wrap"],
@@ -248,6 +366,7 @@ export function attachInfoButtons(openInfo) {
     b.title = "Qué es esto y cómo se usa";
     b.setAttribute("aria-label", `Información sobre: ${INFO[key].title}`);
     b.onclick = () => openInfo(key);
+    b.dataset.info = key;
     box.appendChild(b);
   }
 }

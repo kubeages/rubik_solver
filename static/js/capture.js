@@ -16,6 +16,7 @@ const HANDLE_VEC = {
 };
 const VEC_HANDLE = Object.fromEntries(Object.entries(HANDLE_VEC).map(([k, v]) => [v.join(","), k]));
 const HANDLE_ANGLE = { T: -90, UR: -30, LR: 30, B: 90, LL: 150, UL: 210 };
+const STALL_FRAMES = 18;   // ~3 s without progress: finish with what we have
 
 // ---------------------------------------------------------------------------
 // geometry helpers
@@ -242,6 +243,23 @@ export function repair(model, viewColors, margin, order) {
   return null;
 }
 
+// Which of the 54 stickers came from a doubtful reading, for the review screen.
+export function assembleDoubtful(model, viewDoubtful, rotIndex) {
+  const rots = [IDENTITY, VIEW2_ROTATIONS[rotIndex]];
+  const out = [];
+  model.stickers.forEach(({ pos, normal }, i) => {
+    for (let v = 0; v < 2; v++) {
+      const n = matVec(rots[v], normal);
+      if (n.some((x) => x === 1)) {
+        const key = matVec(rots[v], pos).join(",") + "|" + n.join(",");
+        if (viewDoubtful[v] && viewDoubtful[v].has(key)) out.push(i);
+        return;
+      }
+    }
+  });
+  return out;
+}
+
 // Build the 54-sticker colour array from the two views for one view-2 orientation.
 export function assemble(model, viewColors, rotIndex) {
   const rots = [IDENTITY, VIEW2_ROTATIONS[rotIndex]];
@@ -331,6 +349,7 @@ export class Capture {
     this.view = 0;
     this.viewColors = [null, null];
     this.viewSamples = [null, null];
+    this.viewDoubtful = [new Set(), new Set()];
     this._updateTexts();
     if (mode === "camera") this.startCamera();
     else this._idleUpload();
@@ -422,6 +441,7 @@ export class Capture {
     const ctx = this._scratch.getContext("2d", { willReadFrequently: true });
     ctx.drawImage(v, 0, 0, sw, sh);
     const data = ctx.getImageData(0, 0, sw, sh).data;
+    this._lastData = { data, w: sw, h: sh };
     const res = this.tracker.update(data, sw, sh);
     const k = w / sw;   // back to video coordinates
     if (res.fit) {
@@ -436,7 +456,11 @@ export class Capture {
     } else {
       this._live = null;
     }
-    this._showQuality(res);
+    // If a few stickers refuse to settle (a highlight, a shadow), do not wait
+    // for ever: once the grid is solid, read the stragglers off it and go.
+    const stalled = res.fit && res.fit.score >= 0.68 && this.tracker.read >= 20 && res.stuck >= STALL_FRAMES;
+    if (stalled) this._filled = this.tracker.fillFrom(data, sw, sh);
+    this._showQuality(res, stalled ? 0 : Math.max(0, STALL_FRAMES - (res.stuck || 0)));
     this._renderOverlay({ interactive: false });
     if (this.auto && this.tracker.done) {
       this._flash();
@@ -446,16 +470,20 @@ export class Capture {
     return "checking";
   }
 
-  _showQuality(res) {
+  _showQuality(res, countdown = null) {
     const box = this.els.quality;
     if (!box) return;
     box.hidden = false;
     const read = res.read || 0;
     const level = read === 27 ? "ok" : read >= 18 ? "near" : "bad";
     box.className = `quality ${level}`;
+    let msg = res.message;
+    if (read >= 20 && read < 27 && countdown !== null && countdown <= 12) {
+      msg = `Leídas ${read} de 27 · si no avanza, capturo con lo que hay`;
+    }
     box.innerHTML =
       `<span class="quality-bar"><i style="width:${Math.round((read / 27) * 100)}%"></i></span>` +
-      `<span class="quality-msg">${res.message}</span>`;
+      `<span class="quality-msg">${msg}</span>`;
   }
 
   _flash() {
@@ -492,7 +520,12 @@ export class Capture {
   }
 
   shoot() {
+    // anything still missing is read off the grid before freezing the frame
+    if (this.tracker && this.tracker.lastFit && !this.tracker.done && this._lastData) {
+      this.tracker.fillFrom(this._lastData.data, this._lastData.w, this._lastData.h);
+    }
     const accumulated = this.tracker && this.tracker.read ? this.tracker.colors() : null;
+    const doubtful = this.tracker ? new Set(this.tracker.guessed) : new Set();
     this._stopLiveCheck();
     const v = this.els.video;
     const [w, h] = [v.videoWidth, v.videoHeight];
@@ -503,6 +536,7 @@ export class Capture {
     this._enterAdjust(w, h, this.handles);
     if (accumulated) {
       // readings gathered over several frames beat anything read from one
+      this._doubtful = doubtful;
       this._accumulated = accumulated;
       this.manualEdit = false;
       this.samples = { ...this.samples, ...accumulated };
@@ -522,6 +556,7 @@ export class Capture {
       const found = this._detectStill(w, h);
       this._enterAdjust(w, h, found ? found.handles : null);
       if (found) {
+        this._doubtful = found.doubtful;
         this._accumulated = found.colors;
         this.manualEdit = false;
         this.samples = { ...this.samples, ...found.colors };
@@ -550,9 +585,11 @@ export class Capture {
     for (let i = 0; i < 4; i++) res = tracker.update(data, sw, sh);
     if (!res || !res.fit || tracker.read < 18) return null;
     const k = w / sw;
+    if (tracker.read < 27) tracker.fillFrom(data, sw, sh);
     return {
       read: tracker.read,
       colors: tracker.colors(),
+      doubtful: new Set(tracker.guessed),
       handles: Object.fromEntries(
         Object.entries(res.fit.handles).map(([n, p]) => [n, [p[0] * k, p[1] * k]])),
     };
@@ -560,6 +597,7 @@ export class Capture {
 
   _enterAdjust(w, h, handles) {
     this._accumulated = null;
+    this._doubtful = new Set();
     this.manualEdit = false;
     this.size = [w, h];
     this.els.video.style.display = "none";
@@ -681,6 +719,7 @@ export class Capture {
       // keep what the camera read across frames; the frozen frame only fills gaps
       this.viewSamples[this.view] = { ...this.samples, ...this._accumulated };
     }
+    this.viewDoubtful[this.view] = this.manualEdit ? new Set() : new Set(this._doubtful || []);
     if (this.view === 0) {
       this.view = 1;
       this._updateTexts();
@@ -713,6 +752,8 @@ export class Capture {
     const order = [...Array(VIEW2_COUNT).keys()]
       .map((r) => [r, plausibility(this.model, assemble(this.model, viewColors, r))])
       .sort((a, b) => b[1] - a[1]).map(([r]) => r);
-    return repair(this.model, viewColors, margin, order) || { viewColors, rotIndex: order[0], repaired: 0 };
+    const res = repair(this.model, viewColors, margin, order) || { viewColors, rotIndex: order[0], repaired: 0 };
+    res.doubtful = assembleDoubtful(this.model, this.viewDoubtful, res.rotIndex);
+    return res;
   }
 }

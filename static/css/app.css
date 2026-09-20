@@ -169,6 +169,7 @@ p { margin: 0 0 .8em; }
 .net-cell { width: var(--cell, 30px); height: var(--cell, 30px); border-radius: 5px; border: 0; cursor: pointer; padding: 0; }
 .net-cell.center { box-shadow: inset 0 0 0 2px rgba(0,0,0,.35); }
 .net-cell.bad { outline: 2px solid var(--bad); outline-offset: 1px; }
+.net-cell.doubt { outline: 2px dashed #111; outline-offset: -3px; }
 .review-status { margin: 16px 0; padding: 12px 14px; border-radius: 10px; background: var(--surface-2); font-size: .95rem; }
 .review-status.ok { background: color-mix(in srgb, var(--good) 14%, transparent); }
 .review-status.err { background: color-mix(in srgb, var(--bad) 14%, transparent); }
@@ -220,6 +221,19 @@ p { margin: 0 0 .8em; }
   display: grid; place-items: center; padding: 0;
 }
 .info-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.tip {
+  position: fixed; z-index: 60; background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px;
+  box-shadow: 0 6px 28px rgba(0,0,0,.18); font-size: .82rem; pointer-events: none;
+  max-height: 70vh; overflow: hidden;
+}
+.tip[hidden] { display: none; }
+.tip > b { display: block; margin-bottom: 6px; font-size: .9rem; }
+.tip-more { display: block; margin-top: 8px; color: var(--ink-3); font-size: .74rem; }
+dl.tech { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; }
+dl.tech dt { color: var(--ink-3); white-space: nowrap; }
+dl.tech dd { margin: 0; color: var(--ink-2); }
+.modal-card dl.tech { font-size: .88rem; margin-top: 6px; }
 .panel, .step-card, .cube3d-wrap, .capture-guide, .mode-card, #panel-review { position: relative; }
 .panel-head, .step-meta { padding-right: 28px; }
 #panel-review > h2 { padding-right: 32px; }

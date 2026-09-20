@@ -1,7 +1,7 @@
 import { COLORS, COLOR_KEYS, CubeModel, STANDARD_SCHEME } from "./cubemodel.js";
-import { Capture, assemble, VIEW2_COUNT } from "./capture.js";
+import { Capture, assemble, assembleDoubtful, VIEW2_COUNT } from "./capture.js";
 import { StickerGraph, drawNeighbors, drawLevels, drawPath, drawCaptureGuide } from "./graphs.js";
-import { INFO, attachInfoButtons } from "./info.js";
+import { INFO, attachInfoButtons, techLines } from "./info.js";
 
 const $ = (id) => document.getElementById(id);
 const api = async (url, body) => {
@@ -56,9 +56,64 @@ function modal(html, actions = [{ label: "Entendido", primary: true }]) {
   });
 }
 
+// Live technical detail for a box, shown on hover over its ⓘ and repeated
+// inside the card for anyone using a finger.
+function techContext() {
+  const plan = app.plan;
+  const step = plan ? plan.steps[app.k] : null;
+  return {
+    meta: app.meta, plan, step, index: app.k, mode: plan ? plan.mode : null,
+    stage: step ? stageOf(step) : null,
+    tutor: $("tutor-status") ? $("tutor-status").textContent : "",
+  };
+}
+
+function techHtml(key) {
+  const lines = techLines(key, techContext());
+  if (!lines.length) return "";
+  return `<dl class="tech">${lines.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>`;
+}
+
 function openInfo(key) {
   const entry = INFO[key];
-  if (entry) modal(`<h3>${entry.title}</h3>${entry.html}`, [{ label: "Entendido", primary: true }]);
+  if (!entry) return;
+  modal(`<h3>${entry.title}</h3>${entry.html}<h4>Datos técnicos</h4>${techHtml(key)}`,
+    [{ label: "Entendido", primary: true }]);
+}
+
+let tipEl = null;
+let tipAnchor = null;
+function showTip(button, key) {
+  tipAnchor = { button, key };
+  const html = techHtml(key);
+  if (!html) return;
+  if (!tipEl) {
+    tipEl = document.createElement("div");
+    tipEl.className = "tip";
+    document.body.appendChild(tipEl);
+  }
+  const entry = INFO[key];
+  tipEl.innerHTML = `<b>${entry ? entry.title : ""}</b>${html}<span class="tip-more">Pulsa para la explicación completa</span>`;
+  tipEl.hidden = false;
+  const r = button.getBoundingClientRect();
+  const w = Math.min(340, window.innerWidth - 20);
+  tipEl.style.width = `${w}px`;
+  const top = r.bottom + 8;
+  tipEl.style.left = `${Math.max(10, Math.min(window.innerWidth - w - 10, r.right - w))}px`;
+  tipEl.style.top = `${top}px`;
+  const h = tipEl.getBoundingClientRect().height;
+  if (top + h > window.innerHeight - 10) {
+    tipEl.style.top = `${Math.max(10, r.top - h - 8)}px`;
+  }
+}
+
+function hideTip() {
+  tipAnchor = null;
+  if (tipEl) tipEl.hidden = true;
+}
+
+function repositionTip() {
+  if (tipAnchor) showTip(tipAnchor.button, tipAnchor.key);
 }
 
 const colorName = (key) => (COLORS[key] ? COLORS[key].name : "?");
@@ -115,6 +170,7 @@ function initCapture() {
     onDone: (res) => {
       app.capture = res;
       app.colors = assemble(app.model, res.viewColors, res.rotIndex);
+      app.doubtful = new Set(res.doubtful || []);
       openReview({ fromPhotos: true });
     },
     onCancel: () => show(app.plan ? "solve" : "home"),
@@ -170,11 +226,14 @@ function renderNet() {
     for (let i = 0; i < 9; i++) {
       const idx = 9 * k + i;
       const b = document.createElement("button");
-      b.className = "net-cell" + (i === 4 ? " center" : "");
+      const doubt = app.doubtful && app.doubtful.has(idx);
+      b.className = "net-cell" + (i === 4 ? " center" : "") + (doubt ? " doubt" : "");
+      if (doubt) b.title += " · leída con dudas, compruébala";
       b.style.background = COLORS[app.colors[idx]] ? COLORS[app.colors[idx]].hex : "#666";
       b.title = `${f}${i + 1}`;
       b.onclick = () => {
         app.colors[idx] = activeColor;
+        if (app.doubtful) app.doubtful.delete(idx);
         renderPalette();
         renderNet();
         scheduleValidate();
@@ -207,7 +266,10 @@ async function runValidate() {
       st.textContent = "¡Este cubo ya está resuelto! Mézclalo y vuelve a escanearlo.";
     } else if (r.ok) {
       st.className = "review-status ok";
-      st.textContent = "✓ Es un cubo válido. Elige el modo y calcula el camino.";
+      const doubts = app.doubtful ? app.doubtful.size : 0;
+      st.textContent = doubts
+        ? `✓ Es un cubo válido, pero ${doubts} ${doubts === 1 ? "pegatina se leyó" : "pegatinas se leyeron"} con dudas (marcadas con borde discontinuo): compruébalas antes de seguir.`
+        : "✓ Es un cubo válido. Elige el modo y calcula el camino.";
       $("btn-solve").disabled = false;
     } else {
       st.className = "review-status err";
@@ -402,10 +464,8 @@ function showStep(k) {
   // graph panels
   const mode = plan.mode;
   $("neighbors-sub").textContent = mode === "learn"
-    ? `${step.neighbors.length} aristas salen de aquí · número = distancia exacta a la meta de la fase`
-    : step.stage === "phase1"
-      ? "18 aristas · número = cota inferior de la distancia hasta H"
-      : "número = cota inferior de la distancia a resuelto · guion = sale de H";
+    ? "Cada arista es un movimiento; el número, la distancia a la meta"
+    : "Cada arista es un movimiento; el número, una cota inferior";
   drawNeighbors($("neighbor-graph"), step, { mode });
   $("neighbor-legend").innerHTML =
     `<span><i style="background:var(--good)"></i>más cerca</span><span><i style="background:var(--same)"></i>igual</span>` +
@@ -413,17 +473,14 @@ function showStep(k) {
 
   if (mode === "learn") {
     $("levels-title").textContent = "Capas del grafo de la fase (BFS desde la meta)";
-    $("levels-sub").textContent = `${stage.vertices.toLocaleString("es")} vértices, ${stage.edges_per_vertex} aristas por vértice. ` +
-      `Cada barra cuenta los vértices a esa distancia (escala logarítmica).`;
+    $("levels-sub").textContent = "Cuántos vértices hay a cada distancia de la meta";
     drawLevels($("levels-graph"), stage.histogram, step.d_before);
   } else {
     const tp = app.meta.twophase;
     const key = step.stage === "phase1" ? "twist_slice" : "corners_slice";
     $("levels-title").textContent = step.stage === "phase1"
       ? "Base de datos de patrones de la fase 1" : "Base de datos de patrones de la fase 2";
-    $("levels-sub").textContent = step.stage === "phase1"
-      ? `Grafo reducido (giro de esquinas × posición de las aristas centrales): ${tp.sizes.twist_slice.toLocaleString("es")} vértices recorridos con BFS. Su distancia nunca supera la real: es una cota inferior.`
-      : `Grafo reducido (permutación de esquinas × aristas centrales): ${tp.sizes.corners_slice.toLocaleString("es")} vértices.`;
+    $("levels-sub").textContent = "Distancias en un grafo reducido, usadas como cota inferior";
     drawLevels($("levels-graph"), tp.histograms[key], step.h_before, { label: "cota inferior" });
   }
 
@@ -432,12 +489,12 @@ function showStep(k) {
     const series = steps.map((s) => s.d_before).concat([0]);
     const seps = stageBounds().map((b) => b.from).filter((x) => x > 0);
     drawPath($("path-graph"), series, k, { separators: seps });
-    $("path-sub").textContent = "Distancia a la meta de cada fase; al acabar una fase empieza el grafo de la siguiente.";
+    $("path-sub").textContent = "Distancia a la meta de la fase en curso";
   } else {
     const series = steps.map((s) => s.d_before).concat([0]);
     const bounds = steps.map((s) => s.h_before).concat([0]);
     drawPath($("path-graph"), series, k, { bounds, separators: [plan.search.phase1_length] });
-    $("path-sub").textContent = "Línea: giros que faltan. Discontinua: cota inferior de la fase (IDA*).";
+    $("path-sub").textContent = "Giros que faltan (continua) y cota inferior (discontinua)";
   }
   playStep(0);
 }
@@ -571,6 +628,15 @@ async function boot() {
   heroAnimation();
   initCapture();
   attachInfoButtons(openInfo);
+  document.querySelectorAll(".info-btn").forEach((b) => {
+    const key = b.dataset.info;
+    b.addEventListener("mouseenter", () => showTip(b, key));
+    b.addEventListener("focus", () => showTip(b, key));
+    b.addEventListener("mouseleave", hideTip);
+    b.addEventListener("blur", hideTip);
+  });
+  window.addEventListener("scroll", repositionTip, { passive: true });
+  window.addEventListener("resize", repositionTip);
 
   document.querySelectorAll("[data-action]").forEach((b) => b.addEventListener("click", async () => {
     const a = b.dataset.action;
@@ -579,12 +645,14 @@ async function boot() {
     if (a === "manual") {
       app.colors = app.model.fromFacelets(app.meta.solved);
       app.capture = null;
+      app.doubtful = new Set();
       openReview();
     }
     if (a === "demo") {
       const r = await api("/api/random");
       app.colors = app.model.fromFacelets(r.facelets, STANDARD_SCHEME);
       app.capture = null;
+      app.doubtful = new Set();
       openReview();
     }
   }));
@@ -593,6 +661,7 @@ async function boot() {
     if (!app.capture) return;
     app.capture.rotIndex = (app.capture.rotIndex + 1) % VIEW2_COUNT;
     app.colors = assemble(app.model, app.capture.viewColors, app.capture.rotIndex);
+    app.doubtful = new Set(assembleDoubtful(app.model, app.captureCtl.viewDoubtful, app.capture.rotIndex));
     renderPalette(); renderNet(); scheduleValidate();
   };
   $("btn-rescan").onclick = () => startCapture("camera");
