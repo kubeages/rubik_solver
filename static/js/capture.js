@@ -17,6 +17,7 @@ const HANDLE_VEC = {
 const VEC_HANDLE = Object.fromEntries(Object.entries(HANDLE_VEC).map(([k, v]) => [v.join(","), k]));
 const HANDLE_ANGLE = { T: -90, UR: -30, LR: 30, B: 90, LL: 150, UL: 210 };
 const STALL_FRAMES = 18;   // ~3 s without progress: finish with what we have
+const SEARCH_FRAMES = 42;  // ~7 s without finding the cube: ask for a hand
 
 // ---------------------------------------------------------------------------
 // geometry helpers
@@ -321,6 +322,7 @@ export class Capture {
     this.auto = true;          // take the picture by itself when it looks right
     this._live = null;         // what the detector saw in the last frame
     this.tracker = null;       // accumulates sticker readings across frames
+    this._searching = 0;       // frames in a row without finding the cube
 
     els.shoot.addEventListener("click", () => this.shoot());
     if (els.autoToggle) {
@@ -411,6 +413,8 @@ export class Capture {
 
   _startLiveCheck() {
     this._stopLiveCheck();
+    this._searching = 0;
+    this._lockedScale = null;
     this.tracker = new Tracker(this.model);
     const tick = () => {
       this._liveTimer = null;
@@ -436,14 +440,20 @@ export class Capture {
     if (!v.videoWidth || v.paused || this.els.use.hidden === false) return "idle";
     const [w, h] = this.size;
     if (!this._scratch) this._scratch = document.createElement("canvas");
-    // enough pixels for the stickers to survive, not so many that it drags
-    const sw = Math.min(w, 320), sh = Math.round((sw * h) / w);
+    // How small the cube looks decides how much detail the detector needs, so
+    // while it has not caught the cube we alternate between two sizes; once it
+    // has, we stay with the one that worked.
+    const sizes = [320, 480];
+    if (this._lockedScale === undefined) this._lockedScale = null;
+    const wanted = this._lockedScale || sizes[(this._frameCount = (this._frameCount || 0) + 1) % sizes.length];
+    const sw = Math.min(w, wanted), sh = Math.round((sw * h) / w);
     if (this._scratch.width !== sw) { this._scratch.width = sw; this._scratch.height = sh; }
     const ctx = this._scratch.getContext("2d", { willReadFrequently: true });
     ctx.drawImage(v, 0, 0, sw, sh);
     const data = ctx.getImageData(0, 0, sw, sh).data;
     this._lastData = { data, w: sw, h: sh };
     const res = this.tracker.update(data, sw, sh);
+    this._lockedScale = res.fit ? wanted : null;
     const k = w / sw;   // back to video coordinates
     if (res.fit) {
       this.handles = Object.fromEntries(
@@ -459,7 +469,7 @@ export class Capture {
     }
     // If a few stickers refuse to settle (a highlight, a shadow), do not wait
     // for ever: once the grid is solid, read the stragglers off it and go.
-    const stalled = res.fit && res.fit.score >= 0.68 && this.tracker.read >= 20 && res.stuck >= STALL_FRAMES;
+    const stalled = res.fit && res.fit.score >= 0.5 && this.tracker.read >= 18 && res.stuck >= STALL_FRAMES;
     if (stalled) this._filled = this.tracker.fillFrom(data, sw, sh);
     this._showQuality(res, stalled ? 0 : Math.max(0, STALL_FRAMES - (res.stuck || 0)));
     this._renderOverlay({ interactive: false });
@@ -471,6 +481,28 @@ export class Capture {
     return "checking";
   }
 
+  // Freeze what the camera sees and switch to placing the grid by hand.
+  handOver() {
+    this._stopLiveCheck();
+    const v = this.els.video;
+    const [w, h] = [v.videoWidth, v.videoHeight];
+    if (!w) return;
+    const c = this.els.canvas;
+    c.width = w; c.height = h;
+    c.getContext("2d", { willReadFrequently: true }).drawImage(v, 0, 0, w, h);
+    const found = this._detectStill(w, h);
+    this._enterAdjust(w, h, found ? found.handles : null);
+    if (found) {
+      this._accumulated = found.colors;
+      this.samples = { ...this.samples, ...found.colors };
+      this._renderOverlay({ interactive: true });
+    }
+    this.els.hint.textContent =
+      "No consigo encontrar el cubo solo en esta escena. Arrastra los 7 puntos azules hasta las " +
+      "esquinas del cubo en esta foto: los círculos te muestran el color que lee cada pegatina. " +
+      "Si prefieres reintentarlo, acerca el cubo a la cámara y evita tenerlo a contraluz.";
+  }
+
   _showQuality(res, countdown = null) {
     const box = this.els.quality;
     if (!box) return;
@@ -479,6 +511,10 @@ export class Capture {
     const level = read === 27 ? "ok" : read >= 18 ? "near" : "bad";
     box.className = `quality ${level}`;
     let msg = res.message;
+    if (!res.fit && this._searching > 12) {
+      const left = Math.ceil((SEARCH_FRAMES - this._searching) / 6);
+      msg = `Buscando el cubo… acércalo a la cámara (en ${left} s lo ajustamos a mano)`;
+    }
     if (read >= 20 && read < 27 && countdown !== null && countdown <= 12) {
       msg = `Leídas ${read} de 27 · si no avanza, capturo con lo que hay`;
     }

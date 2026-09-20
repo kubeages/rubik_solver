@@ -83,14 +83,136 @@ export function normalize(data, w, h) {
 
 // maxArea is generous on purpose: held close to the camera a single sticker
 // can cover a good part of the frame, and dropping those left nothing to find.
+// Mask of the cube's dark frame, decided locally.
+//
+// A single threshold for the whole picture cannot work: against a window, a
+// dark green sticker is darker than the black plastic in the lit part of the
+// cube. So each pixel is compared with the average of its surroundings, which
+// is what makes the thin dark lines stand out wherever they are.
+function darkMask(data, w, h, block) {
+  const n = w * h;
+  const integral = new Float64Array((w + 1) * (h + 1));
+  for (let y = 0; y < h; y++) {
+    let row = 0;
+    for (let x = 0; x < w; x++) {
+      const k = (y * w + x) * 4;
+      row += 0.299 * data[k] + 0.587 * data[k + 1] + 0.114 * data[k + 2];
+      integral[(y + 1) * (w + 1) + x + 1] = integral[y * (w + 1) + x + 1] + row;
+    }
+  }
+  const r = Math.max(4, block >> 1);
+  const mask = new Uint8Array(n);
+  for (let y = 0; y < h; y++) {
+    const y0 = Math.max(0, y - r), y1 = Math.min(h - 1, y + r);
+    for (let x = 0; x < w; x++) {
+      const x0 = Math.max(0, x - r), x1 = Math.min(w - 1, x + r);
+      const area = (x1 - x0 + 1) * (y1 - y0 + 1);
+      const sum = integral[(y1 + 1) * (w + 1) + x1 + 1] - integral[y0 * (w + 1) + x1 + 1] -
+        integral[(y1 + 1) * (w + 1) + x0] + integral[y0 * (w + 1) + x0];
+      const mean = sum / area;
+      const k = (y * w + x) * 4;
+      const L = 0.299 * data[k] + 0.587 * data[k + 1] + 0.114 * data[k + 2];
+      // dark compared with its own surroundings, and not merely a shaded face
+      if (L < mean * 0.86 - 2) mask[y * w + x] = 1;
+    }
+  }
+  return mask;
+}
+
+// Thicken the frame by one pixel so that a line broken by blur or by a soft
+// shadow still separates the two stickers beside it.
+function dilate(mask, w, h, times) {
+  for (let t = 0; t < times; t++) {
+    const out = new Uint8Array(mask);
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        const p = y * w + x;
+        if (mask[p]) continue;
+        if (mask[p - 1] || mask[p + 1] || mask[p - w] || mask[p + w]) out[p] = 1;
+      }
+    }
+    mask.set(out);
+  }
+  return mask;
+}
+
+// Stickers as the holes of the cube's dark frame.
+//
+// Grouping pixels by colour was the first approach and it broke on a real
+// cube: printed logos, shading and a hazy webcam split every sticker into
+// crumbs. The black plastic between stickers survives all of that, so we mark
+// the frame and keep the patches it encloses.
+export function segmentHoles(data, w, h, { colorFrom = null, minArea = 12, block = 0, thicken = 0 } = {}) {
+  const src = colorFrom || data;
+  const n = w * h;
+  const mask = darkMask(data, w, h, block || Math.round(w / 10));
+  if (thicken) dilate(mask, w, h, thicken);
+  const label = new Int32Array(n).fill(-1);
+  const queue = new Int32Array(n);
+  const blobs = [];
+  const maxPixels = 0.2 * n;
+  for (let start = 0; start < n; start++) {
+    if (label[start] !== -1) continue;
+    if (mask[start]) { label[start] = -2; continue; }
+    let head = 0, tail = 0;
+    queue[tail++] = start;
+    label[start] = blobs.length;
+    let count = 0, sx = 0, sy = 0, minX = w, maxX = 0, minY = h, maxY = 0, touches = false;
+    while (head < tail) {
+      const p = queue[head++];
+      const x = p % w, y = (p / w) | 0;
+      count++; sx += x; sy += y;
+      if (x === 0 || y === 0 || x === w - 1 || y === h - 1) touches = true;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+      if (count > maxPixels) break;
+      const push = (q) => {
+        if (label[q] !== -1) return;
+        if (mask[q]) { label[q] = -2; return; }
+        label[q] = blobs.length;
+        queue[tail++] = q;
+      };
+      if (x > 0) push(p - 1);
+      if (x < w - 1) push(p + 1);
+      if (y > 0) push(p - w);
+      if (y < h - 1) push(p + w);
+    }
+    const bw = maxX - minX + 1, bh = maxY - minY + 1;
+    const aspect = bw / bh;
+    if (touches || count < minArea || count > maxPixels) continue;
+    if (aspect < 0.45 || aspect > 2.2) continue;
+    if (count / (bw * bh) < 0.5) continue;
+    const cx = sx / count, cy = sy / count;
+    // colour from the middle, by median, so a printed logo cannot drag it
+    const inner = 0.5 * Math.sqrt(count / Math.PI);
+    const rs = [], gs = [], bs = [];
+    for (let t = 0; t < tail; t++) {
+      const p = queue[t];
+      const dx = (p % w) - cx, dy = ((p / w) | 0) - cy;
+      if (dx * dx + dy * dy > inner * inner) continue;
+      const k = p * 4;
+      rs.push(src[k]); gs.push(src[k + 1]); bs.push(src[k + 2]);
+    }
+    if (!rs.length) continue;
+    const med = (a) => { a.sort((x, y) => x - y); return a[a.length >> 1]; };
+    blobs.push({
+      cx, cy, area: count, size: Math.sqrt(count / 0.87),
+      rgb: [med(rs), med(gs), med(bs)],
+    });
+  }
+  return blobs;
+}
+
 // `colorFrom` lets the shapes be found on a contrast-stretched copy while the
 // colours are still read from the original pixels, which is what the rest of
 // the pipeline compares between the two views.
 export function segmentBlobs(data, w, h, { minArea = 10, maxArea = 0.16, split = false, colorFrom = null } = {}) {
   const src = colorFrom || data;
   const n = w * h;
-  const drift = split ? 60 : 95;
-  const edgeJump = split ? 40 : 60;
+  const drift = split ? 70 : 150;
+  const edgeJump = split ? 45 : 85;
   const seen = new Uint8Array(n);
   const blobs = [];
   const queue = new Int32Array(n);
@@ -672,6 +794,7 @@ export class Tracker {
     this.doubts = new Map();    // sticker key -> readings that contradict the locked colour
     this.guessed = new Set();   // filled from a single frame, worth a second look
     this.pose = null;
+    this.blockHint = null;
     this.handles = null;
     this.lastFit = null;
     this.stuck = 0;             // frames since the count last went up
@@ -701,38 +824,59 @@ export class Tracker {
 
   // One frame: returns what was seen, and grows the readings.
   update(data, w, h) {
-    // shapes are looked for on a contrast-stretched copy (a bright room washes
-    // the cube out), colours are always read from the original pixels
+    // shapes are looked for on a smoothed copy (sensor noise and the speckle
+    // of a glossy sticker make the patches ragged), colours always come from
+    // the original pixels
     const shapes = new Uint8ClampedArray(data);
     smooth(shapes, w, h);
-    normalize(shapes, w, h);
+    // The frame is marked by comparing each pixel with its surroundings, and
+    // how wide those surroundings are matters: too wide and the thin lines of
+    // a small cube are lost. We do not know how big the cube looks, so a few
+    // widths are tried and the one whose grid fits best wins.
+    // Two ways of finding the stickers, because neither wins everywhere: the
+    // holes of the dark frame (robust to printed logos and shading) and
+    // patches of uniform colour (better when the frame is not clearly dark).
+    // The width of the surroundings used to mark the frame matters too, and
+    // the apparent size of the cube is unknown, so a few are tried. Whichever
+    // grid fits best wins.
     const minArea = Math.max(10, Math.round((w * h) / 20000));
-    let blobs = segmentBlobs(shapes, w, h, { minArea, colorFrom: data });
-    let fit = fitCube(this.model, blobs, w, h, this.pose, shapes);
-    if (!fit || fit.score < 0.72) {
-      // patches may have merged (a strong light washes the line between two
-      // pale stickers out): split more eagerly and keep whichever grid fits
-      // better. Counting patches is not a good enough test: splitting always
-      // makes more of them, and fragments read the wrong colour.
-      const alt = segmentBlobs(shapes, w, h, { minArea, split: true, colorFrom: data });
-      if (alt.length >= 9) {
-        const altFit = fitCube(this.model, alt, w, h, this.pose, shapes);
-        if (altFit && (!fit || altFit.score > fit.score)) { blobs = alt; fit = altFit; }
+    const sources = [];
+    if (this.blockHint) {
+      sources.push(this.blockHint === "color"
+        ? { key: "color", blobs: segmentBlobs(shapes, w, h, { minArea, colorFrom: data }) }
+        : { key: this.blockHint, blobs: segmentHoles(shapes, w, h, { colorFrom: data, block: this.blockHint, thicken: 1 }) });
+    } else {
+      for (const width of [w / 26, w / 16, w / 10]) {
+        const block = Math.max(6, Math.round(width));
+        sources.push({ key: block, blobs: segmentHoles(shapes, w, h, { colorFrom: data, block, thicken: 1 }) });
+      }
+      sources.push({ key: "color", blobs: segmentBlobs(shapes, w, h, { minArea, colorFrom: data }) });
+    }
+    let fit = null, blobs = [];
+    for (const source of sources) {
+      if (source.blobs.length > blobs.length) blobs = source.blobs;   // for the message
+      if (source.blobs.length < 9) continue;
+      const candidate = fitCube(this.model, source.blobs, w, h, this.pose, shapes);
+      if (candidate && (!fit || candidate.score > fit.score)) {
+        fit = candidate;
+        blobs = source.blobs;
+        this.blockHint = source.key;
       }
     }
+    if (!fit) this.blockHint = null;   // lost it: search the widths again
     this.lastFit = fit;
-    if (!fit || fit.score < 0.35) {
+    if (!fit || fit.score < 0.3) {
       return { blobs: blobs.length, fit: null, read: this.read, message: blobs.length < 8
         ? "Enfoca el cubo: acércalo o busca más luz"
         : "Buscando el cubo…" };
     }
     this.pose = { P: fit.P };
     this.handles = fit.handles;
-    this.goodFrames = fit.score >= 0.6 ? this.goodFrames + 1 : 0;
+    this.goodFrames = fit.score >= 0.5 ? this.goodFrames + 1 : 0;
     const centers = fit.stickers.map((s, i) => ({ key: s.key, xy: fit.centers[i] }));
     const tol = fit.cell * 0.5;
     const before = this.read;
-    if (fit.score < 0.55) {
+    if (fit.score < 0.42) {
       // the grid is not solid enough to trust what is under it
       this.stuck = this.stuck + 1;
       return { blobs: blobs.length, fit, read: this.read, centers, stuck: this.stuck,
@@ -747,7 +891,7 @@ export class Tracker {
       let rgb = null, fromPatch = false;
       if (best && bestD <= tol && best.size > fit.cell * 0.35 && best.size < fit.cell * 1.6) {
         rgb = best.rgb;
-      } else if (this.goodFrames >= 1 && fit.score >= 0.55) {
+      } else if (this.goodFrames >= 1 && fit.score >= 0.45) {
         // no patch here (glare, a shadow, two stickers merged): read the pixels
         // under the grid instead, now that we trust where the grid is
         rgb = patchColor(data, w, h, c.xy[0], c.xy[1], Math.max(1, fit.cell * 0.18));
