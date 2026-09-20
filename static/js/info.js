@@ -168,6 +168,9 @@ export const INFO = {
         <li>Si alguna se resiste (un brillo, una sombra), mueve un poco el cubo o cambia el ángulo:
         cada pegatina se da por buena cuando se lee varias veces con el mismo color.</li>
         <li>Si prefieres disparar tú, quita «Captura automática» y usa «Capturar ahora».</li>
+        <li><b>¿No hay manera?</b> Pulsa «Ajustar a mano»: congela la imagen y colocas tú los 7
+        puntos sobre las esquinas del cubo. Es el camino que funciona siempre, y son diez segundos.
+        Si pasan unos segundos sin encontrarlo, la aplicación te lleva ahí sola.</li>
       </ul>
       <h4>Paso a paso</h4>
       <ul>

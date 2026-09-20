@@ -17,7 +17,7 @@ const HANDLE_VEC = {
 const VEC_HANDLE = Object.fromEntries(Object.entries(HANDLE_VEC).map(([k, v]) => [v.join(","), k]));
 const HANDLE_ANGLE = { T: -90, UR: -30, LR: 30, B: 90, LL: 150, UL: 210 };
 const STALL_FRAMES = 18;   // ~3 s without progress: finish with what we have
-const SEARCH_FRAMES = 42;  // ~7 s without finding the cube: ask for a hand
+const SEARCH_FRAMES = 30;  // ~5 s without finding the cube: ask for a hand
 
 // ---------------------------------------------------------------------------
 // geometry helpers
@@ -335,6 +335,7 @@ export class Capture {
     els.use.addEventListener("click", () => this.useView());
     els.cancel.addEventListener("click", () => { this.stop(); this.onCancel(); });
     if (els.diag) els.diag.addEventListener("click", () => this.saveFrame());
+    if (els.manual) els.manual.addEventListener("click", () => this.handOver(true));
     els.file.addEventListener("change", (e) => {
       const f = e.target.files[0];
       e.target.value = "";
@@ -482,7 +483,7 @@ export class Capture {
   }
 
   // Freeze what the camera sees and switch to placing the grid by hand.
-  handOver() {
+  handOver(onRequest = false) {
     this._stopLiveCheck();
     const v = this.els.video;
     const [w, h] = [v.videoWidth, v.videoHeight];
@@ -497,10 +498,11 @@ export class Capture {
       this.samples = { ...this.samples, ...found.colors };
       this._renderOverlay({ interactive: true });
     }
-    this.els.hint.textContent =
-      "No consigo encontrar el cubo solo en esta escena. Arrastra los 7 puntos azules hasta las " +
-      "esquinas del cubo en esta foto: los círculos te muestran el color que lee cada pegatina. " +
-      "Si prefieres reintentarlo, acerca el cubo a la cámara y evita tenerlo a contraluz.";
+    this.els.hint.textContent = (onRequest
+      ? "Coloca la cuadrícula tú mismo: "
+      : "No consigo encontrar el cubo solo en esta escena. ") +
+      "arrastra los 7 puntos azules hasta las esquinas del cubo (el del centro, a la esquina que " +
+      "apunta hacia ti). Los círculos muestran el color que lee cada pegatina.";
   }
 
   _showQuality(res, countdown = null) {
@@ -561,6 +563,7 @@ export class Capture {
     const e = this.els;
     e.shoot.hidden = state !== "camera";
     if (e.diag) e.diag.hidden = state !== "camera";
+    if (e.manual) e.manual.hidden = state !== "camera";
     if (e.autoToggle) e.autoToggle.parentElement.hidden = state !== "camera";
     e.uploadLabel.hidden = state === "adjust";
     e.retake.hidden = !(state === "adjust" && this.mode === "camera");

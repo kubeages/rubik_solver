@@ -13,3 +13,4 @@ claude_resume.sh
 # Private/local config — never commit real hostnames, IPs, or credentials
 *.local.yaml
 *.local.yml
+capturas/

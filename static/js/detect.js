@@ -182,8 +182,11 @@ export function segmentHoles(data, w, h, { colorFrom = null, minArea = 12, block
     const bw = maxX - minX + 1, bh = maxY - minY + 1;
     const aspect = bw / bh;
     if (touches || count < minArea || count > maxPixels) continue;
-    if (aspect < 0.45 || aspect > 2.2) continue;
-    if (count / (bw * bh) < 0.5) continue;
+    if (aspect < 0.4 || aspect > 2.5) continue;
+    // A sticker seen at an angle is a rhombus, and a rhombus fills exactly
+    // half of its bounding box: asking for more than that threw away almost
+    // every sticker of a tilted cube.
+    if (count / (bw * bh) < 0.34) continue;
     const cx = sx / count, cy = sy / count;
     // colour from the middle, by median, so a printed logo cannot drag it
     const inner = 0.5 * Math.sqrt(count / Math.PI);
@@ -262,8 +265,8 @@ export function segmentBlobs(data, w, h, { minArea = 10, maxArea = 0.16, split =
     if (count < minArea || count > maxPixels) continue;
     const bw = maxX - minX + 1, bh = maxY - minY + 1;
     const aspect = bw / bh;
-    if (aspect < 0.55 || aspect > 1.8) continue;
-    if (count / (bw * bh) < 0.55) continue;              // not a solid patch
+    if (aspect < 0.45 || aspect > 2.2) continue;
+    if (count / (bw * bh) < 0.34) continue;              // a rhombus fills half
     const cx = sx / count, cy = sy / count;
     // Colour from the middle of the patch only: its border blurs into the
     // black line around the sticker, and averaging that in drags the colour
@@ -439,6 +442,38 @@ export function matchScore(model, handles, blobs, cell) {
     if (v > 0.3) { hits++; used.add(best); }
   }
   return { score: score / centers.length, hits, spread: used.size / Math.max(1, centers.length) };
+}
+
+// Keep only the patches that sit on a regular lattice: a cube's stickers are
+// all about the same size and about one cell apart from their neighbours, so
+// they form one big connected group. A hand, a shirt or a poster in the
+// background do not, and letting them into the fit was dragging the grid off
+// the cube.
+export function latticeCluster(blobs) {
+  if (blobs.length < 9) return blobs;
+  const sizes = blobs.map((b) => b.size).sort((a, b) => a - b);
+  const s = sizes[sizes.length >> 1];
+  const candidates = blobs.filter((b) => b.size > s * 0.55 && b.size < s * 1.9);
+  if (candidates.length < 9) return blobs;
+  const step = s * 1.15;                      // centre to centre of neighbours
+  const parent = candidates.map((_, i) => i);
+  const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+  const union = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb; };
+  for (let i = 0; i < candidates.length; i++) {
+    for (let j = i + 1; j < candidates.length; j++) {
+      const d = Math.hypot(candidates[i].cx - candidates[j].cx, candidates[i].cy - candidates[j].cy);
+      if (d > step * 0.55 && d < step * 1.6) union(i, j);
+    }
+  }
+  const groups = new Map();
+  candidates.forEach((b, i) => {
+    const r = find(i);
+    if (!groups.has(r)) groups.set(r, []);
+    groups.get(r).push(b);
+  });
+  let best = [];
+  for (const g of groups.values()) if (g.length > best.length) best = g;
+  return best.length >= 9 ? best : blobs;
 }
 
 function clusterSeed(blobs) {
@@ -648,6 +683,73 @@ function outsideHits(P, blobs, cell) {
   return { hits, probes: probes.length };
 }
 
+// Seeds built from the lattice itself.
+//
+// Neighbouring stickers are one cell apart, and on a cube seen from a corner
+// those steps fall into three directions. Recovering them from the patches
+// and placing the grid on the centre of the cluster gives a starting point
+// that is already almost right, which a search over sizes and rotations can
+// miss entirely.
+export function latticeSeeds(model, blobs) {
+  if (blobs.length < 9) return [];
+  const sizes = blobs.map((b) => b.size).sort((a, b) => a - b);
+  const cell = sizes[sizes.length >> 1] * 1.15;
+  // steps between close patches, folded to 0..180 degrees
+  const bins = new Array(36).fill(null).map(() => []);
+  for (let i = 0; i < blobs.length; i++) {
+    for (let j = i + 1; j < blobs.length; j++) {
+      const dx = blobs[j].cx - blobs[i].cx, dy = blobs[j].cy - blobs[i].cy;
+      const d = Math.hypot(dx, dy);
+      if (d < cell * 0.6 || d > cell * 1.45) continue;
+      let a = Math.atan2(dy, dx);
+      if (a < 0) a += Math.PI;
+      bins[Math.min(35, Math.floor((a / Math.PI) * 36))].push([dx, dy, d]);
+    }
+  }
+  // three dominant directions, at least 25 degrees apart
+  const order = bins.map((v, i) => [v.length, i]).sort((x, y) => y[0] - x[0]);
+  const picked = [];
+  for (const [count, i] of order) {
+    if (!count) break;
+    const angle = ((i + 0.5) / 36) * Math.PI;
+    if (picked.some((p) => {
+      const d = Math.abs(p.angle - angle);
+      return Math.min(d, Math.PI - d) < 0.42;
+    })) continue;
+    const list = bins[i];
+    const mean = list.reduce((acc, [dx, dy]) => {
+      const flip = dx * Math.cos(angle) + dy * Math.sin(angle) < 0 ? -1 : 1;
+      acc[0] += dx * flip; acc[1] += dy * flip;
+      return acc;
+    }, [0, 0]).map((v) => v / list.length);
+    picked.push({ angle, vec: mean, count });
+    if (picked.length === 3) break;
+  }
+  if (picked.length < 3) return [];
+  const centre = blobs.reduce((acc, b) => [acc[0] + b.cx / blobs.length, acc[1] + b.cy / blobs.length], [0, 0]);
+  const stickers = visibleStickers(model);
+  const seeds = [];
+  // each axis can point either way; the three that spread out around the
+  // centre are the ones that describe the cube
+  for (const signs of [[1, 1, 1], [1, 1, -1], [1, -1, 1], [-1, 1, 1], [1, -1, -1], [-1, 1, -1], [-1, -1, 1], [-1, -1, -1]]) {
+    const axes = picked.map((p, k) => [p.vec[0] * signs[k], p.vec[1] * signs[k]]);
+    for (const order3 of [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]) {
+      const [ax, ay, az] = order3.map((k) => axes[k]);
+      const centers = stickers.map((st) => {
+        // sticker centre = near corner + offsets along the two in-face axes
+        const p = st.p3;
+        const u = (p[0] - 1.5), v = (p[1] - 1.5), t = (p[2] - 1.5);
+        return [
+          centre[0] + u * ax[0] + v * ay[0] + t * az[0],
+          centre[1] + u * ax[1] + v * ay[1] + t * az[1],
+        ];
+      });
+      seeds.push({ centers, cell });
+    }
+  }
+  return seeds;
+}
+
 export function fitCube(model, blobs, w, h, start, data) {
   if (blobs.length < 9) return null;
   const seed = clusterSeed(blobs);
@@ -738,6 +840,10 @@ export function fitCube(model, blobs, w, h, start, data) {
   }
 
   const hypotheses = [];
+  for (const seed of latticeSeeds(model, blobs)) {
+    const ok = seed.centers.every((c) => isFinite(c[0]) && isFinite(c[1]));
+    if (ok) hypotheses.push({ centers: seed.centers, cell: seed.cell, rough: 0.5 });
+  }
   for (let f = 2.7; f <= 4.3; f += 0.2) {
     for (let th = -0.38; th <= 0.381; th += 0.076) {
       for (const [ox, oy] of [[0, 0], [-0.5, 0], [0.5, 0], [0, -0.5], [0, 0.5]]) {
@@ -748,10 +854,10 @@ export function fitCube(model, blobs, w, h, start, data) {
       }
     }
   }
-  hypotheses.sort((x, y) => y.rough - x.rough);
-
   let best = null;
-  for (const hyp of hypotheses.slice(0, 18)) {
+  const lattice = hypotheses.filter((hy) => hy.rough === 0.5);
+  const rest = hypotheses.filter((hy) => hy.rough !== 0.5).sort((x, y) => y.rough - x.rough);
+  for (const hyp of lattice.concat(rest.slice(0, 18))) {
     const res = icp(hyp.centers, hyp.cell);
     if (res && (!best || res.total > best.total)) best = res;
     if (best && best.total > 0.93) break;      // good enough, stop early
@@ -856,10 +962,12 @@ export class Tracker {
     for (const source of sources) {
       if (source.blobs.length > blobs.length) blobs = source.blobs;   // for the message
       if (source.blobs.length < 9) continue;
-      const candidate = fitCube(this.model, source.blobs, w, h, this.pose, shapes);
+      const onLattice = latticeCluster(source.blobs);
+      if (onLattice.length < 9) continue;
+      const candidate = fitCube(this.model, onLattice, w, h, this.pose, shapes);
       if (candidate && (!fit || candidate.score > fit.score)) {
         fit = candidate;
-        blobs = source.blobs;
+        blobs = onLattice;
         this.blockHint = source.key;
       }
     }
