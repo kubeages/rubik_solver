@@ -28,7 +28,12 @@ Ideas que puedes usar:
 - Modo aprendizaje: cada fase del método por capas mira solo unas piezas, así el grafo es pequeño (p. ej. la cruz: 190.080 vértices). Se calcula con BFS (búsqueda en anchura) la distancia exacta de cada vértice a la meta, y cada paso sigue una arista que baja la distancia en 1: un camino más corto. Las aristas pueden ser algoritmos enteros (macro-operadores).
 - Modo rápido (Kociemba, dos fases): fase 1 busca en el grafo cociente G/H hasta entrar en el subgrupo H=<U,D,R2,L2,F2,B2>; fase 2 resuelve dentro de H. Usa IDA* con cotas inferiores (bases de datos de patrones), que nunca sobreestiman la distancia.
 Si el usuario parece perdido con el cubo físico, dale consejos prácticos (cómo sujetar el cubo, qué significa la notación: R = cara derecha en sentido horario mirándola de frente, R' antihorario, R2 media vuelta).
-No inventes movimientos distintos de los que da la aplicación."""
+
+Cuidado con estas confusiones:
+- R, U, F, D, L y B son SIEMPRE giros de una cara, nunca nombres de piezas. "U" significa girar la cara de arriba, no una arista llamada U.
+- En el modo aprendizaje la primera capa se construye ABAJO (la cara D), así que "la cruz de la base" son las cuatro aristas de la cara de abajo, no las de arriba.
+- La "distancia" que te pasa el contexto es la distancia en el grafo de esa fase, contando aristas (a veces cada arista es un algoritmo entero), no el número de giros.
+No inventes movimientos distintos de los que da la aplicación y, si el contexto no te dice algo, dilo en vez de suponerlo."""
 
 
 def enabled() -> bool:
