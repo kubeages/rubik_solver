@@ -88,6 +88,7 @@ oc create secret generic rubik-solver-llm --from-literal=VLLM_API_KEY=...
 HASH=$(python -c "from werkzeug.security import generate_password_hash as g; print(g('your-password'))")
 oc create secret generic rubik-solver-auth \
   --from-literal=AUTH_USER=you --from-literal=AUTH_PASSWORD_HASH="$HASH"
+#   more accounts: --from-literal=AUTH_USERS="ana:<hash>,luis:<hash>"
 
 # 3. Deploy, then create the Route with your own host
 oc apply -k k8s/overlays/openshift/
@@ -119,6 +120,7 @@ kubectl apply -k k8s/overlays/kubernetes/
 | `AUTH_USER` | _(empty)_ | Username for the login form. Empty = any username |
 | `AUTH_PASSWORD_HASH` | _(empty)_ | Password hash (`werkzeug.security.generate_password_hash`) |
 | `AUTH_PASSWORD` | _(empty)_ | Plain password, if you prefer it to the hash. Both empty = no login |
+| `AUTH_USERS` | _(empty)_ | More accounts: `ana:<hash>,luis:<hash>` (a value that is not a hash is taken as a plain password) |
 | `AUTH_SESSION_DAYS` | `30` | How long a session lasts |
 | `SECRET_KEY` | _(derived)_ | Signs the session cookie; derived from the credentials when unset |
 | `COOKIE_SECURE` | `1` | Set to `0` only when serving over plain http |

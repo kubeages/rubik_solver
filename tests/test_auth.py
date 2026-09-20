@@ -67,3 +67,53 @@ def test_lockout_after_repeated_failures(secured):
 def test_without_password_the_app_is_open():
     import app as app_module
     assert app_module.app.test_client().get("/").status_code == 200
+
+
+@pytest.fixture()
+def two_users(monkeypatch):
+    from werkzeug.security import generate_password_hash
+    monkeypatch.setenv("AUTH_USER", "marta")
+    monkeypatch.setenv("AUTH_PASSWORD_HASH", generate_password_hash("secreta"))
+    monkeypatch.setenv("AUTH_USERS", f"pablo:{generate_password_hash('otra')}, ana:enclaro")
+    monkeypatch.setenv("COOKIE_SECURE", "0")
+    import auth
+    import app as app_module
+    importlib.reload(auth)
+    app_module = importlib.reload(app_module)
+    yield app_module.app.test_client()
+    monkeypatch.undo()
+    importlib.reload(auth)
+    importlib.reload(app_module)
+
+
+@pytest.mark.parametrize("user,password", [("marta", "secreta"), ("pablo", "otra"), ("ana", "enclaro")])
+def test_every_account_can_log_in(two_users, user, password):
+    assert two_users.post("/login", data={"username": user, "password": password}).status_code == 302
+    assert two_users.get("/").status_code == 200
+
+
+@pytest.mark.parametrize("user,password", [
+    ("marta", "otra"),        # right user, another account's password
+    ("pablo", "secreta"),
+    ("pepe", "secreta"),     # unknown user
+    ("", "secreta"),         # no user at all
+])
+def test_wrong_combinations_are_refused(two_users, user, password):
+    assert two_users.post("/login", data={"username": user, "password": password}).status_code == 401
+    assert two_users.get("/").status_code == 302
+
+
+def test_the_header_shows_who_is_logged_in(two_users):
+    two_users.post("/login", data={"username": "pablo", "password": "otra"})
+    assert "pablo" in two_users.get("/").get_data(as_text=True)
+
+
+def test_malformed_entries_are_ignored(monkeypatch):
+    monkeypatch.setenv("AUTH_USERS", "sinseparador, :sinnombre, ana:vale")
+    monkeypatch.delenv("AUTH_USER", raising=False)
+    monkeypatch.delenv("AUTH_PASSWORD_HASH", raising=False)
+    import auth
+    importlib.reload(auth)
+    assert sorted(auth._accounts()) == ["ana"]
+    monkeypatch.undo()
+    importlib.reload(auth)

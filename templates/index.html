@@ -22,7 +22,7 @@
     <span class="brand-mark" aria-hidden="true"></span>
     <span>Rubik <em>con grafos</em></span>
   </a>
-  {% if auth_enabled %}<a class="logout" href="/logout" title="Cerrar sesión">Salir</a>{% endif %}
+  {% if auth_enabled %}<a class="logout" href="/logout" title="Cerrar sesión">{% if auth_user %}<b>{{ auth_user }}</b> · {% endif %}Salir</a>{% endif %}
   <nav class="steps-nav" aria-label="Progreso">
     <span data-screen-link="home" class="active">1 · Empezar</span>
     <span data-screen-link="capture">2 · Escanear</span>

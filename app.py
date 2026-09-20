@@ -6,7 +6,7 @@ import logging
 import os
 import threading
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, session
 
 import auth
 from cube import stages, tutor, twophase
@@ -36,7 +36,8 @@ threading.Thread(target=_warm_up, daemon=True).start()
 
 @app.context_processor
 def inject_globals():
-    return {"site_domain": SITE_DOMAIN, "auth_enabled": auth.enabled()}
+    return {"site_domain": SITE_DOMAIN, "auth_enabled": auth.enabled(),
+            "auth_user": session.get("user", "")}
 
 
 @app.route("/")

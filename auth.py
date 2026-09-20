@@ -21,6 +21,9 @@ log = logging.getLogger("rubik.auth")
 AUTH_USER = os.environ.get("AUTH_USER", "")
 AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "")
 AUTH_PASSWORD_HASH = os.environ.get("AUTH_PASSWORD_HASH", "")
+# Extra accounts: "ana:<hash>,luis:<hash>" (commas or newlines between them).
+# A value that is not a werkzeug hash is taken as a plain password.
+AUTH_USERS = os.environ.get("AUTH_USERS", "")
 SESSION_DAYS = int(os.environ.get("AUTH_SESSION_DAYS", "30"))
 
 # how many failed attempts an address gets before it has to wait
@@ -30,8 +33,25 @@ LOCKOUT_SECONDS = 300
 _failures: dict[str, tuple[int, float]] = {}
 
 
+def _accounts() -> dict[str, str]:
+    """username -> password hash (or plain password), from the environment."""
+    users: dict[str, str] = {}
+    if AUTH_PASSWORD_HASH or AUTH_PASSWORD:
+        users[AUTH_USER] = AUTH_PASSWORD_HASH or AUTH_PASSWORD
+    for entry in AUTH_USERS.replace("\n", ",").split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        name, sep, secret = entry.partition(":")
+        if not sep or not name.strip() or not secret.strip():
+            log.warning("AUTH_USERS: se ignora una entrada mal formada")
+            continue
+        users[name.strip()] = secret.strip()
+    return users
+
+
 def enabled() -> bool:
-    return bool(AUTH_PASSWORD or AUTH_PASSWORD_HASH)
+    return bool(_accounts())
 
 
 def secret_key() -> str:
@@ -44,17 +64,32 @@ def secret_key() -> str:
     key = os.environ.get("SECRET_KEY")
     if key:
         return key
-    seed = "rubik-solver|" + AUTH_USER + "|" + AUTH_PASSWORD + "|" + AUTH_PASSWORD_HASH
+    seed = "rubik-solver|" + "|".join(f"{u}={s}" for u, s in sorted(_accounts().items()))
     return hashlib.sha256(seed.encode()).hexdigest()
 
 
-def _check(user: str, password: str) -> bool:
-    ok_user = hmac.compare_digest(user.strip(), AUTH_USER) if AUTH_USER else True
-    if AUTH_PASSWORD_HASH:
-        ok_pass = check_password_hash(AUTH_PASSWORD_HASH, password)
+def _check(user: str, password: str) -> str | None:
+    """Return the name of the account that matches, or None."""
+    users = _accounts()
+    user = user.strip()
+    # a single account with an empty name accepts any username (dev shortcut)
+    secret = users.get(user)
+    if secret is None and list(users) == [""]:
+        secret, user = users[""], "user"
+    if secret is None:
+        # still spend the time of a hash check, so a wrong username is not
+        # noticeably faster than a wrong password
+        check_password_hash(_DUMMY_HASH, password)
+        return None
+    if secret.startswith(("scrypt:", "pbkdf2:", "argon2")):
+        ok = check_password_hash(secret, password)
     else:
-        ok_pass = hmac.compare_digest(password, AUTH_PASSWORD)
-    return ok_user and ok_pass
+        ok = hmac.compare_digest(password, secret)
+    return user if ok else None
+
+
+_DUMMY_HASH = ("scrypt:32768:8:1$0000000000000000$"
+               "0" * 128)
 
 
 def _client() -> str:
@@ -113,10 +148,12 @@ def init(app):
         ip = _client()
         wait = _locked_for(ip)
         if request.method == "POST" and not wait:
-            if _check(request.form.get("username", ""), request.form.get("password", "")):
+            who = _check(request.form.get("username", ""), request.form.get("password", ""))
+            if who:
                 session.permanent = True
-                session["user"] = AUTH_USER or "user"
+                session["user"] = who
                 _failures.pop(ip, None)
+                log.info("entra %s desde %s", who, ip)
                 return redirect(target)
             _record_failure(ip)
             wait = _locked_for(ip)
@@ -124,7 +161,7 @@ def init(app):
             log.info("login fallido desde %s", ip)
         if wait:
             error = f"Demasiados intentos. Espera {wait // 60 + 1} min."
-        return render_template("login.html", error=error, next=target, user_hint=bool(AUTH_USER)), (401 if error else 200)
+        return render_template("login.html", error=error, next=target), (401 if error else 200)
 
     @app.route("/logout")
     def logout():
