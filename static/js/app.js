@@ -210,6 +210,7 @@ function ensureFaceScan() {
     onStep: (step, faces) => updateFacePreview(faces, step),
   }, {
     onDone: (faces) => {
+      app.orientedFaces = 0;
       app.colors = facesToColors(faces);
       app.capture = null;
       app.doubtful = new Set();
@@ -236,7 +237,55 @@ function facesToColors(faces) {
     }
   });
   const { colors } = classify(samples, centreIds);
-  return Array.from({ length: 54 }, (_, i) => colors[String(i)]);
+  const read = Array.from({ length: 54 }, (_, i) => colors[String(i)]);
+  return orientFaces(read);
+}
+
+// Turn a face's nine stickers a quarter turn clockwise.
+function turnFace(nine) {
+  const out = new Array(9);
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) out[c * 3 + (2 - r)] = nine[r * 3 + c];
+  return out;
+}
+
+// Work out how each face was actually held.
+//
+// The order of the steps assumes the cube is turned a particular way, and a
+// hand does not always oblige: one face comes out rotated and the cube is
+// then impossible. Rather than demanding precision, we try the turns of each
+// face and keep the combination that makes a cube that could exist. The
+// centres do not move, so the colours themselves are never in question.
+function orientFaces(read) {
+  const faces = "URFDLB".split("").map((_, k) => read.slice(k * 9, k * 9 + 9));
+  const variants = faces.map((nine) => {
+    const list = [nine];
+    for (let i = 0; i < 3; i++) list.push(turnFace(list[list.length - 1]));
+    return list;
+  });
+  const build = (turns) => {
+    const out = [];
+    for (let k = 0; k < 6; k++) out.push(...variants[k][turns[k]]);
+    return out;
+  };
+  if (app.model.isValid(read)) return read;
+  // fewest turns first, so a cube held right is never second-guessed
+  const options = [];
+  for (let a = 0; a < 4; a++) for (let b = 0; b < 4; b++) for (let c = 0; c < 4; c++) {
+    for (let d = 0; d < 4; d++) for (let e = 0; e < 4; e++) for (let f = 0; f < 4; f++) {
+      const turns = [a, b, c, d, e, f];
+      options.push([turns.reduce((s, t) => s + Math.min(t, 4 - t), 0), turns]);
+    }
+  }
+  options.sort((x, y) => x[0] - y[0]);
+  for (const [, turns] of options) {
+    const candidate = build(turns);
+    if (app.model.isValid(candidate)) {
+      const moved = turns.filter((t) => t).length;
+      app.orientedFaces = moved;
+      return candidate;
+    }
+  }
+  return read;           // nothing fits: the review screen will say so
 }
 
 function updateFacePreview(faces, step, current) {
@@ -388,6 +437,12 @@ async function runValidate() {
     } else if (r.ok) {
       st.className = "review-status ok";
       const doubts = app.doubtful ? app.doubtful.size : 0;
+      if (app.orientedFaces) {
+        st.textContent = `✓ Es un cubo válido. ${app.orientedFaces === 1 ? "Una cara estaba girada" : `${app.orientedFaces} caras estaban giradas`} respecto al orden que te pedí, y lo he corregido solo.`;
+        $("btn-solve").disabled = false;
+        renderBasePicker();
+        return;
+      }
       st.textContent = doubts
         ? `✓ Es un cubo válido, pero ${doubts} ${doubts === 1 ? "pegatina se leyó" : "pegatinas se leyeron"} con dudas (marcadas con borde discontinuo): compruébalas antes de seguir.`
         : "✓ Es un cubo válido. Elige el modo y calcula el camino.";
