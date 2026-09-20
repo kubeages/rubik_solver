@@ -438,7 +438,8 @@ async function runValidate() {
   $("btn-solve").disabled = true;
   if (new Set(centres).size !== 6) {
     st.className = "review-status err";
-    st.textContent = "Los seis centros deben ser de colores distintos.";
+    st.textContent = "Dos caras se han leído con el mismo color en el centro, así que alguna está " +
+      "repetida o mal leída. Corrige los centros abajo o vuelve a escanear.";
     return;
   }
   const facelets = app.model.toFacelets(app.colors);

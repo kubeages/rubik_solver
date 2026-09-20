@@ -40,7 +40,7 @@ export const STEPS = [
 ];
 
 const HOLD_FRAMES = 2;      // frames with the nine settled before moving on
-const TURN_PAUSE_MS = 1600; // time to turn the cube before reading the next face
+const TURN_PAUSE_MS = 2200; // time to turn the cube before reading the next face
 const RESCUE_MS = 7000;     // one sticker stuck: read it off the grid
 const PATIENCE_MS = 18000;  // after this, offer to place the grid by hand
 
@@ -172,8 +172,23 @@ export class FaceScan {
       this.els.hint.textContent = "Aún faltan pegatinas por leer en esta cara.";
       return false;
     }
-    // If it reads the same as the face just stored, the cube has not been
-    // turned yet and this would record the same face twice.
+    // A cube has six different centres, so a face whose centre matches one
+    // already stored is a face already scanned: the cube has not been turned,
+    // or has been turned back to one that is done. Either way it must not be
+    // recorded twice, which was making the cube come out impossible.
+    const already = this._alreadyScanned(colors);
+    if (already) {
+      this.reader.reset();
+      this._settledFrames = 0;
+      this._startedAt = Date.now();
+      if (this.els.quality) {
+        this.els.quality.className = "quality near";
+        this.els.quality.innerHTML =
+          `<span class="quality-bar"><i style="width:100%"></i></span>` +
+          `<span class="quality-msg">Esa cara ya la tienes (la ${already}) · enséñame una que falte</span>`;
+      }
+      return false;
+    }
     const previous = this.step > 0 ? this.faces[STEPS[this.step - 1].face] : null;
     if (previous && sameFace(previous, colors)) {
       this.reader.reset();
@@ -208,6 +223,19 @@ export class FaceScan {
     return true;
   }
 
+  // Which stored face this one is, if any: centres are one per colour.
+  _alreadyScanned(colors) {
+    const centre = colors[4];
+    if (!centre) return null;
+    for (const step of STEPS.slice(0, this.step)) {
+      const stored = this.faces[step.face];
+      if (!stored || !stored[4]) continue;
+      const d = Math.hypot(centre[0] - stored[4][0], centre[1] - stored[4][1], centre[2] - stored[4][2]);
+      if (d < 50) return step.name.replace(/^de la |^de /, "");
+    }
+    return null;
+  }
+
   // A moment to turn the cube before the next face starts being read, or the
   // face still in front of the camera would be read again as the next one.
   _pauseThenRead() {
@@ -223,6 +251,8 @@ export class FaceScan {
   }
 
   retakeFace() {
+    // start this face again from scratch, keeping the ones already stored
+    delete this.faces[STEPS[this.step].face];
     this.reader.reset();
     this.manual = false;
     this.corners = null;
@@ -382,7 +412,10 @@ export class FaceScan {
     e.shoot.hidden = state !== "camera";
     e.shoot.textContent = "Dar por buena esta cara";
     if (e.manual) e.manual.hidden = state !== "camera";
-    if (e.retake) e.retake.hidden = state !== "manual";
+    if (e.retake) {
+      e.retake.hidden = false;
+      e.retake.textContent = "Repetir esta cara";
+    }
     if (e.use) {
       e.use.hidden = state !== "manual";
       e.use.textContent = "Usar esta cara ›";
