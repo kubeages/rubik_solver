@@ -1,0 +1,649 @@
+// Finding the cube in a camera frame.
+//
+// Rather than asking the user to fit the cube inside a guide, we look for the
+// stickers themselves: patches of uniform colour, roughly square, all about
+// the same size. Then we fit the cube's grid (position, size, rotation and a
+// bit of perspective) so that its 27 sticker centres land on those patches.
+// Readings are accumulated over frames until every sticker has been seen
+// several times with the same colour, which survives glare and blur far
+// better than any single frame.
+
+const HANDLE_ANGLE = { T: -90, UR: -30, LR: 30, B: 90, LL: 150, UL: 210 };
+
+export function poseHandles(cx, cy, r, theta) {
+  const out = { C: [cx, cy] };
+  for (const [k, a] of Object.entries(HANDLE_ANGLE)) {
+    const ang = (a * Math.PI) / 180 + theta;
+    out[k] = [cx + r * Math.cos(ang), cy + r * Math.sin(ang)];
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Sticker-like patches
+// ---------------------------------------------------------------------------
+
+export function segmentBlobs(data, w, h, { minArea = 12, maxArea = 0.06 } = {}) {
+  const n = w * h;
+  const seen = new Uint8Array(n);
+  const blobs = [];
+  const queue = new Int32Array(n);
+  const maxPixels = maxArea * n;
+  const luma = (k) => 0.299 * data[k * 4] + 0.587 * data[k * 4 + 1] + 0.114 * data[k * 4 + 2];
+
+  for (let start = 0; start < n; start++) {
+    if (seen[start]) continue;
+    const L0 = luma(start);
+    if (L0 < 55) { seen[start] = 1; continue; }          // cube body, shadows
+    const edge = Math.max(45, L0 * 0.62);                // the dark line around a sticker
+    const r0 = data[start * 4], g0 = data[start * 4 + 1], b0 = data[start * 4 + 2];
+    let head = 0, tail = 0;
+    queue[tail++] = start;
+    seen[start] = 1;
+    let sum = [0, 0, 0], count = 0;
+    let minX = w, maxX = 0, minY = h, maxY = 0, sx = 0, sy = 0;
+    while (head < tail) {
+      const p = queue[head++];
+      const k = p * 4;
+      const x = p % w, y = (p / w) | 0;
+      sum[0] += data[k]; sum[1] += data[k + 1]; sum[2] += data[k + 2];
+      sx += x; sy += y; count++;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+      if (count > maxPixels) break;
+      const push = (q) => {
+        if (seen[q]) return;
+        const j = q * 4;
+        // stop at the dark line between stickers, judged against this patch
+        if (luma(q) < edge) { seen[q] = 1; return; }
+        // and grow only while the colour stays close to where the patch started
+        if (Math.abs(data[j] - r0) + Math.abs(data[j + 1] - g0) + Math.abs(data[j + 2] - b0) > 78) return;
+        seen[q] = 1;
+        queue[tail++] = q;
+      };
+      if (x > 0) push(p - 1);
+      if (x < w - 1) push(p + 1);
+      if (y > 0) push(p - w);
+      if (y < h - 1) push(p + w);
+    }
+    if (count < minArea || count > maxPixels) continue;
+    const bw = maxX - minX + 1, bh = maxY - minY + 1;
+    const aspect = bw / bh;
+    if (aspect < 0.55 || aspect > 1.8) continue;
+    if (count / (bw * bh) < 0.55) continue;              // not a solid patch
+    blobs.push({
+      cx: sx / count, cy: sy / count, area: count,
+      size: Math.sqrt(count / 0.87),                     // side of a rhombic sticker
+      rgb: [sum[0] / count, sum[1] / count, sum[2] / count],
+    });
+  }
+  return blobs;
+}
+
+// ---------------------------------------------------------------------------
+// Fitting the cube's grid to those patches
+// ---------------------------------------------------------------------------
+
+// --- fitting a camera ------------------------------------------------------
+//
+// A cube held at arm's length is described well by a weak-perspective camera:
+// image = A * point + t, with A a 2x3 matrix. That is eight numbers, solved
+// exactly by least squares. The full projective camera was tried first and
+// rejected: with eleven free numbers it can skew the grid until it lands on
+// the cube's own lattice one cell across, which reads every sticker wrong.
+
+// Scaled orthographic camera: image = s*R*point + t, with R the two first
+// rows of a rotation. Fitting a free 2x3 matrix instead is tempting, and
+// wrong: a shear slides the grid one cell along the cube's own lattice and
+// every sticker is then read from its neighbour. Forcing the two rows to be
+// orthogonal and equally long removes exactly that freedom.
+export function solveCamera(pts3, pts2) {
+  const n = pts3.length;
+  if (n < 4) return null;
+  let px = 0, py = 0, pz = 0, qx = 0, qy = 0;
+  for (let i = 0; i < n; i++) {
+    px += pts3[i][0]; py += pts3[i][1]; pz += pts3[i][2];
+    qx += pts2[i][0]; qy += pts2[i][1];
+  }
+  px /= n; py /= n; pz /= n; qx /= n; qy /= n;
+  // free affine fit: A = (Q'P)(P'P)^-1
+  const S = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  const B = [[0, 0, 0], [0, 0, 0]];
+  for (let i = 0; i < n; i++) {
+    const p = [pts3[i][0] - px, pts3[i][1] - py, pts3[i][2] - pz];
+    const q = [pts2[i][0] - qx, pts2[i][1] - qy];
+    for (let r = 0; r < 3; r++) {
+      for (let c = 0; c < 3; c++) S[r][c] += p[r] * p[c];
+      B[0][r] += q[0] * p[r];
+      B[1][r] += q[1] * p[r];
+    }
+  }
+  const inv = invert3(S);
+  if (!inv) return null;
+  const A = [0, 1].map((r) => [0, 1, 2].map((c) =>
+    B[r][0] * inv[0][c] + B[r][1] * inv[1][c] + B[r][2] * inv[2][c]));
+
+  // nearest scaled-orthographic matrix: equalise the two singular values
+  const g11 = A[0][0] ** 2 + A[0][1] ** 2 + A[0][2] ** 2;
+  const g22 = A[1][0] ** 2 + A[1][1] ** 2 + A[1][2] ** 2;
+  const g12 = A[0][0] * A[1][0] + A[0][1] * A[1][1] + A[0][2] * A[1][2];
+  const tr = g11 + g22, det = g11 * g22 - g12 * g12;
+  const disc = Math.max(0, tr * tr / 4 - det);
+  const l1 = tr / 2 + Math.sqrt(disc), l2 = tr / 2 - Math.sqrt(disc);
+  if (l2 <= 1e-9) return null;
+  const s1 = Math.sqrt(l1), s2 = Math.sqrt(l2), s = (s1 + s2) / 2;
+  // eigenvectors of the 2x2 Gram matrix give the directions to rescale
+  const ev = (l) => {
+    const v = Math.abs(g12) > 1e-9 ? [l - g22, g12] : (l === l1 ? [1, 0] : [0, 1]);
+    const norm = Math.hypot(v[0], v[1]) || 1;
+    return [v[0] / norm, v[1] / norm];
+  };
+  const u1 = ev(l1), u2 = ev(l2);
+  // A' = (s/s1) u1 u1' A + (s/s2) u2 u2' A
+  const Ap = [[0, 0, 0], [0, 0, 0]];
+  for (const [u, f] of [[u1, s / s1], [u2, s / s2]]) {
+    for (let r = 0; r < 2; r++) for (let c = 0; c < 3; c++) {
+      Ap[r][c] += f * u[r] * (u[0] * A[0][c] + u[1] * A[1][c]);
+    }
+  }
+  const P = [
+    Ap[0][0], Ap[0][1], Ap[0][2], qx - (Ap[0][0] * px + Ap[0][1] * py + Ap[0][2] * pz),
+    Ap[1][0], Ap[1][1], Ap[1][2], qy - (Ap[1][0] * px + Ap[1][1] * py + Ap[1][2] * pz),
+  ];
+  return P.every((v) => isFinite(v)) ? P : null;
+}
+
+function invert3(m) {
+  const [a, b, c] = m[0], [d, e, f] = m[1], [g, h, i] = m[2];
+  const det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+  if (Math.abs(det) < 1e-9) return null;
+  return [
+    [(e * i - f * h) / det, (c * h - b * i) / det, (b * f - c * e) / det],
+    [(f * g - d * i) / det, (a * i - c * g) / det, (c * d - a * f) / det],
+    [(d * h - e * g) / det, (b * g - a * h) / det, (a * e - b * d) / det],
+  ];
+}
+
+export function project(P, [X, Y, Z]) {
+  return [P[0] * X + P[1] * Y + P[2] * Z + P[3], P[4] * X + P[5] * Y + P[6] * Z + P[7]];
+}
+
+// The 27 visible stickers in cube coordinates, and the 7 visible corners.
+export function visibleStickers(model) {
+  return model.stickers
+    .map((s, i) => ({ ...s, index: i }))
+    .filter((s) => s.normal.some((v) => v === 1))
+    .map((s) => ({
+      key: s.pos.join(",") + "|" + s.normal.join(","),
+      p3: s.pos.map((v, k) => v + 0.5 * s.normal[k]),
+    }));
+}
+
+export const CORNERS_3D = {
+  C: [1.5, 1.5, 1.5], T: [-1.5, 1.5, -1.5], UR: [1.5, 1.5, -1.5],
+  LR: [1.5, -1.5, -1.5], B: [1.5, -1.5, 1.5], LL: [-1.5, -1.5, 1.5], UL: [-1.5, 1.5, 1.5],
+};
+
+// The 27 visible sticker centres of a view, in screen coordinates.
+export function stickerCenters(model, handles) {
+  const VEC = {
+    "1,1,1": "C", "-1,1,-1": "T", "1,1,-1": "UR", "1,-1,-1": "LR",
+    "1,-1,1": "B", "-1,-1,1": "LL", "-1,1,1": "UL",
+  };
+  const out = [];
+  for (const { pos, normal } of model.stickers) {
+    const axis = normal.findIndex((v) => v === 1);
+    if (axis < 0) continue;
+    const [i, j] = [0, 1, 2].filter((k) => k !== axis);
+    const corner = (si, sj) => {
+      const v = [0, 0, 0];
+      v[axis] = 1; v[i] = si; v[j] = sj;
+      return handles[VEC[v.join(",")]];
+    };
+    const p00 = corner(-1, -1), p10 = corner(1, -1), p11 = corner(1, 1), p01 = corner(-1, 1);
+    const u = (pos[i] + 1.5) / 3, v = (pos[j] + 1.5) / 3;
+    // bilinear inside the face: good enough for a mild perspective
+    const xy = [0, 1].map((c) =>
+      (1 - u) * (1 - v) * p00[c] + u * (1 - v) * p10[c] + u * v * p11[c] + (1 - u) * v * p01[c]);
+    out.push({ key: pos.join(",") + "|" + normal.join(","), xy });
+  }
+  return out;
+}
+
+// How many of the 27 expected stickers actually have a patch under them.
+export function matchScore(model, handles, blobs, cell) {
+  const centers = stickerCenters(model, handles);
+  const tol = cell * 0.55;
+  let score = 0, hits = 0;
+  const used = new Set();
+  for (const c of centers) {
+    let best = null, bestD = Infinity;
+    for (let i = 0; i < blobs.length; i++) {
+      const b = blobs[i];
+      const d = Math.hypot(b.cx - c.xy[0], b.cy - c.xy[1]);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    if (best === null) continue;
+    const b = blobs[best];
+    const sizeOk = b.size > cell * 0.35 && b.size < cell * 1.6;
+    if (!sizeOk) continue;
+    const v = Math.max(0, 1 - bestD / tol);
+    score += v;
+    if (v > 0.3) { hits++; used.add(best); }
+  }
+  return { score: score / centers.length, hits, spread: used.size / Math.max(1, centers.length) };
+}
+
+function clusterSeed(blobs) {
+  // centre of the densest group of patches: that is where the cube is
+  let best = null, bestCount = -1;
+  const sizes = blobs.map((b) => b.size).sort((a, b) => a - b);
+  const s = sizes[sizes.length >> 1] || 10;
+  for (const b of blobs) {
+    let count = 0, sx = 0, sy = 0;
+    for (const o of blobs) {
+      if (Math.hypot(o.cx - b.cx, o.cy - b.cy) < s * 4.2 && o.size > s * 0.45 && o.size < s * 2.2) {
+        count++; sx += o.cx; sy += o.cy;
+      }
+    }
+    if (count > bestCount) { bestCount = count; best = [sx / count, sy / count]; }
+  }
+  return { center: best, size: s, count: bestCount };
+}
+
+// Seen from a corner, a cube looks the same when turned 120 degrees about that
+// corner, so the grid fits equally well with the three faces swapped. Only the
+// layout tells them apart: in this view the top face is U, and of the other
+// two, the one on the right is R. This returns true when P agrees with that.
+function orientationOk(P) {
+  const u = project(P, [0, 1.5, 0]), r = project(P, [1.5, 0, 0]), f = project(P, [0, 0, 1.5]);
+  if (!u || !r || !f) return false;
+  return u[1] < r[1] && u[1] < f[1] && r[0] > f[0];
+}
+
+// The two other ways round: rotating the cube 120 or 240 degrees about the
+// corner pointing at the camera.
+function cyclePermutations(stickers) {
+  const key = (p) => p.map((v) => v.toFixed(2)).join(",");
+  const index = new Map(stickers.map((s, i) => [key(s.p3), i]));
+  const turns = [([x, y, z]) => [z, x, y], ([x, y, z]) => [y, z, x]];
+  return turns.map((t) => stickers.map((s) => index.get(key(t(s.p3)))));
+}
+
+// --- polygons: does the grid cover the same footprint as the patches? ------
+
+function convexHull(points) {
+  const pts = points.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (pts.length < 3) return pts;
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const build = (list) => {
+    const out = [];
+    for (const p of list) {
+      while (out.length >= 2 && cross(out[out.length - 2], out[out.length - 1], p) <= 0) out.pop();
+      out.push(p);
+    }
+    out.pop();
+    return out;
+  };
+  return build(pts).concat(build(pts.reverse()));
+}
+
+function polyArea(poly) {
+  let a = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i], q = poly[(i + 1) % poly.length];
+    a += p[0] * q[1] - q[0] * p[1];
+  }
+  return Math.abs(a) / 2;
+}
+
+// Sutherland-Hodgman, valid because both polygons are convex
+function clipPoly(subject, clip) {
+  let out = subject;
+  for (let i = 0; i < clip.length && out.length; i++) {
+    const a = clip[i], b = clip[(i + 1) % clip.length];
+    const side = (p) => (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
+    const input = out;
+    out = [];
+    for (let j = 0; j < input.length; j++) {
+      const p = input[j], q = input[(j + 1) % input.length];
+      const sp = side(p), sq = side(q);
+      if (sp >= 0) out.push(p);
+      if ((sp >= 0) !== (sq >= 0)) {
+        const t = sp / (sp - sq);
+        out.push([p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])]);
+      }
+    }
+  }
+  return out;
+}
+
+function footprintOverlap(centers, blobs, cell) {
+  let cx = 0, cy = 0;
+  for (const c of centers) { cx += c[0]; cy += c[1]; }
+  cx /= centers.length; cy /= centers.length;
+  const near = blobs.filter((b) =>
+    b.size > cell * 0.4 && b.size < cell * 1.7 && Math.hypot(b.cx - cx, b.cy - cy) < cell * 4.3);
+  if (near.length < 9) return 0;
+  const hullGrid = convexHull(centers);
+  const hullBlobs = convexHull(near.map((b) => [b.cx, b.cy]));
+  if (hullGrid.length < 3 || hullBlobs.length < 3) return 0;
+  const inter = polyArea(clipPoly(hullGrid, hullBlobs));
+  const union = polyArea(hullGrid) + polyArea(hullBlobs) - inter;
+  return union > 0 ? inter / union : 0;
+}
+
+// Quality of a fitted grid. Counting matched stickers is not enough: a grid
+// shifted by one cell also lands on patches. So patches that sit next to the
+// cube and are left unexplained count against it, which pins the grid down.
+function gridScore(centers, blobs, cell) {
+  const tol = cell * 0.5;
+  let cx = 0, cy = 0;
+  for (const c of centers) { cx += c[0]; cy += c[1]; }
+  cx /= centers.length; cy /= centers.length;
+  const near = blobs.filter((b) =>
+    b.size > cell * 0.4 && b.size < cell * 1.7 && Math.hypot(b.cx - cx, b.cy - cy) < cell * 4.3);
+  const takenBlob = new Set();
+  let matched = 0;
+  for (const c of centers) {
+    let best = -1, bestD = Infinity;
+    near.forEach((b, i) => {
+      const d = Math.hypot(b.cx - c[0], b.cy - c[1]);
+      if (d < bestD) { bestD = d; best = i; }
+    });
+    if (best >= 0 && bestD < tol && !takenBlob.has(best)) { takenBlob.add(best); matched++; }
+  }
+  const unexplained = near.length - takenBlob.size;
+  return { matched, unexplained, score: (matched - unexplained) / 27 };
+}
+
+// Do the black lines of the cube fall between the slots of this grid?
+// A grid shifted by one cell matches just as many patches, but its boundaries
+// land in the middle of stickers and on the background, so this tells them
+// apart. Faces are given as the nine slot positions of each face, in order.
+function lineScore(centers, data, w, h, cell) {
+  const lum = (x, y) => {
+    const px = Math.round(x), py = Math.round(y);
+    if (px < 0 || py < 0 || px >= w || py >= h) return null;
+    const k = (py * w + px) * 4;
+    return 0.299 * data[k] + 0.587 * data[k + 1] + 0.114 * data[k + 2];
+  };
+  const patch = (x, y, r) => {
+    let sum = 0, n = 0;
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      const v = lum(x + dx, y + dy);
+      if (v !== null) { sum += v; n++; }
+    }
+    return n ? sum / n : null;
+  };
+  const r = Math.max(1, Math.round(cell * 0.12));
+  const darkest = (a, b) => {           // darkest spot on the segment between two slots
+    let best = Infinity;
+    for (const t of [0.42, 0.5, 0.58]) {
+      for (const u of [-0.18, 0, 0.18]) {   // and a little along the line itself
+        const x = a[0] + (b[0] - a[0]) * t - (b[1] - a[1]) * u;
+        const y = a[1] + (b[1] - a[1]) * t + (b[0] - a[0]) * u;
+        const v = lum(x, y);
+        if (v !== null && v < best) best = v;
+      }
+    }
+    return isFinite(best) ? best : null;
+  };
+  let good = 0, total = 0;
+  for (let f = 0; f < 3; f++) {
+    for (let row = 0; row < 3; row++) for (let col = 0; col < 3; col++) {
+      const here = centers[f * 9 + row * 3 + col];
+      for (const [dr, dc] of [[0, 1], [1, 0]]) {
+        const r2 = row + dr, c2 = col + dc;
+        if (r2 > 2 || c2 > 2) continue;
+        const there = centers[f * 9 + r2 * 3 + c2];
+        const mid = [(here[0] + there[0]) / 2, (here[1] + there[1]) / 2];
+        const a = patch(here[0], here[1], r), b = patch(there[0], there[1], r);
+        const m = darkest(here, there);
+        if (a === null || b === null || m === null) continue;
+        total++;
+        const ref = Math.min(a, b);
+        if (m < Math.max(0.74 * ref, 32)) good++;
+      }
+    }
+  }
+  return total ? good / total : 0;
+}
+
+// Stickers found just outside the grid, where the cube should already have
+// ended. A grid shifted by one cell leaves a whole row of real stickers out
+// there, so this is what finally pins it down: inside the cube every lattice
+// looks alike, the silhouette does not.
+function outsideHits(P, blobs, cell) {
+  const probes = [];
+  // for each visible face, the two rows beyond its silhouette edges
+  for (const [axis, sign] of [[1, 1], [0, 1], [2, 1]]) {        // faces U, R, F
+    const others = [0, 1, 2].filter((k) => k !== axis);
+    for (const out of others) {
+      for (const t of [-1, 0, 1]) {
+        const p = [0, 0, 0];
+        p[axis] = 1.5 * sign;
+        p[out] = -2;                                            // one row past the edge
+        p[others.find((k) => k !== out)] = t;
+        probes.push(p);
+      }
+    }
+  }
+  let hits = 0;
+  for (const p of probes) {
+    const xy = project(P, p);
+    if (!xy) continue;
+    for (const b of blobs) {
+      if (b.size < cell * 0.4 || b.size > cell * 1.7) continue;
+      if (Math.hypot(b.cx - xy[0], b.cy - xy[1]) < cell * 0.45) { hits++; break; }
+    }
+  }
+  return { hits, probes: probes.length };
+}
+
+export function fitCube(model, blobs, w, h, start, data) {
+  if (blobs.length < 9) return null;
+  const seed = clusterSeed(blobs);
+  if (!seed.center || seed.count < 9) return null;
+  const stickers = visibleStickers(model);
+  const perms = cyclePermutations(stickers);
+
+  const finish = (fit) => {
+    if (!fit || fit.matched.length < 10) return null;
+    const handles = {};
+    for (const [name, p3] of Object.entries(CORNERS_3D)) {
+      const xy = project(fit.P, p3);
+      if (!xy) return null;
+      handles[name] = xy;
+    }
+    return {
+      P: fit.P, handles, cell: fit.cell, centers: fit.centers, stickers,
+      score: Math.max(0, fit.total), patches: fit.score, lines: fit.lines, foot: fit.foot,
+      hits: fit.matched.length, unexplained: fit.unexplained,
+    };
+  };
+
+  // Several hypotheses for size and rotation, refined and judged in full.
+  // A single starting guess is not enough: the grid can settle one cell off
+  // along the cube's own lattice, and from there no local step escapes.
+  const icp = (startCenters, startCell, iterations = 5) => {
+    let centers = startCenters, cell = startCell, P = null, matched = [];
+    for (let iter = 0; iter < iterations; iter++) {
+      const pairs = [];
+      centers.forEach((c, i) => {
+        blobs.forEach((b, j) => {
+          const d = Math.hypot(b.cx - c[0], b.cy - c[1]);
+          if (d < cell * 0.7 && b.size > cell * 0.3 && b.size < cell * 1.7) pairs.push([d, i, j]);
+        });
+      });
+      pairs.sort((x, y) => x[0] - y[0]);
+      const usedSticker = new Set(), usedBlob = new Set();
+      matched = [];
+      for (const [, i, j] of pairs) {
+        if (usedSticker.has(i) || usedBlob.has(j)) continue;
+        usedSticker.add(i); usedBlob.add(j);
+        matched.push({ sticker: i, blob: j });
+      }
+      if (matched.length < 8) return null;
+      const pts2 = matched.map((m) => [blobs[m.blob].cx, blobs[m.blob].cy]);
+      let Pn = solveCamera(matched.map((m) => stickers[m.sticker].p3), pts2);
+      if (!Pn) return null;
+      if (!orientationOk(Pn)) {
+        let fixed = null;
+        for (const perm of perms) {
+          if (perm.some((v) => v === undefined)) continue;
+          const alt = solveCamera(matched.map((m) => stickers[perm[m.sticker]].p3), pts2);
+          if (alt && orientationOk(alt)) {
+            matched = matched.map((m) => ({ ...m, sticker: perm[m.sticker] }));
+            fixed = alt;
+            break;
+          }
+        }
+        if (!fixed) return null;
+        Pn = fixed;
+      }
+      const proj = stickers.map((st) => project(Pn, st.p3));
+      if (proj.some((c) => !c || !isFinite(c[0]) || !isFinite(c[1]))) return null;
+      P = Pn;
+      centers = proj;
+      const d1 = Math.hypot(centers[0][0] - centers[1][0], centers[0][1] - centers[1][1]);
+      const d2 = Math.hypot(centers[0][0] - centers[3][0], centers[0][1] - centers[3][1]);
+      cell = Math.max(3, Math.min(d1, d2) || cell);
+    }
+    const q = gridScore(centers, blobs, cell);
+    const lines = data ? lineScore(centers, data, w, h, cell) : 0;
+    const foot = footprintOverlap(centers, blobs, cell);
+    return {
+      P, centers, cell, matched, ...q, lines, foot,
+      total: 0.35 * q.score + 0.2 * lines + 0.45 * foot,
+    };
+  };
+
+  // Tracking: once the grid is known, following it from frame to frame is
+  // cheap. Only a fresh acquisition pays for the full search below.
+  if (start && start.P) {
+    const c0 = stickers.map((st) => project(start.P, st.p3));
+    if (!c0.some((c) => !c)) {
+      const d = Math.hypot(c0[0][0] - c0[1][0], c0[0][1] - c0[1][1]);
+      const tracked = icp(c0, Math.max(3, d));
+      if (tracked && tracked.total > 0.62) return finish(tracked);
+    }
+  }
+
+  const hypotheses = [];
+  for (let f = 2.7; f <= 4.3; f += 0.2) {
+    for (let th = -0.38; th <= 0.381; th += 0.076) {
+      for (const [ox, oy] of [[0, 0], [-0.5, 0], [0.5, 0], [0, -0.5], [0, 0.5]]) {
+        const pose = [seed.center[0] + ox * seed.size, seed.center[1] + oy * seed.size, seed.size * f, th];
+        const handles0 = poseHandles(...pose);
+        const rough = matchScore(model, handles0, blobs, pose[2] / 3).score;
+        hypotheses.push({ centers: stickerCenters(model, handles0).map((c) => c.xy), cell: pose[2] / 3, rough, pose });
+      }
+    }
+  }
+  hypotheses.sort((x, y) => y.rough - x.rough);
+
+  let best = null;
+  for (const hyp of hypotheses.slice(0, 18)) {
+    const res = icp(hyp.centers, hyp.cell);
+    if (res && (!best || res.total > best.total)) best = res;
+    if (best && best.total > 0.93) break;      // good enough, stop early
+  }
+
+  return finish(best);
+}
+
+// Median colour of a small square, robust to a stray highlight.
+function patchColor(data, w, h, x, y, r) {
+  const x0 = Math.max(0, Math.round(x - r)), y0 = Math.max(0, Math.round(y - r));
+  const x1 = Math.min(w - 1, Math.round(x + r)), y1 = Math.min(h - 1, Math.round(y + r));
+  if (x1 < x0 || y1 < y0) return null;
+  const rs = [], gs = [], bs = [];
+  for (let py = y0; py <= y1; py++) for (let px = x0; px <= x1; px++) {
+    const k = (py * w + px) * 4;
+    rs.push(data[k]); gs.push(data[k + 1]); bs.push(data[k + 2]);
+  }
+  const med = (a) => { a.sort((p, q) => p - q); return a[a.length >> 1]; };
+  return [med(rs), med(gs), med(bs)];
+}
+
+// ---------------------------------------------------------------------------
+// Reading the 27 stickers over several frames
+// ---------------------------------------------------------------------------
+
+export class Tracker {
+  constructor(model, { votes = 3, tolerance = 34 } = {}) {
+    this.goodFrames = 0;
+    this.model = model;
+    this.votesNeeded = votes;
+    this.tolerance = tolerance;
+    this.reset();
+  }
+
+  reset() {
+    this.goodFrames = 0;
+    this.votes = new Map();     // sticker key -> [rgb, ...]
+    this.locked = new Map();    // sticker key -> rgb
+    this.pose = null;
+    this.handles = null;
+    this.lastFit = null;
+  }
+
+  get total() { return 27; }
+  get read() { return this.locked.size; }
+  get done() { return this.locked.size === 27; }
+
+  // One frame: returns what was seen, and grows the readings.
+  update(data, w, h) {
+    const blobs = segmentBlobs(data, w, h);
+    const fit = fitCube(this.model, blobs, w, h, this.pose, data);
+    this.lastFit = fit;
+    if (!fit || fit.score < 0.35) {
+      return { blobs: blobs.length, fit: null, read: this.read, message: blobs.length < 8
+        ? "Enfoca el cubo: acércalo o busca más luz"
+        : "Buscando el cubo…" };
+    }
+    this.pose = { P: fit.P };
+    this.handles = fit.handles;
+    this.goodFrames = fit.score >= 0.6 ? this.goodFrames + 1 : 0;
+    const centers = fit.stickers.map((s, i) => ({ key: s.key, xy: fit.centers[i] }));
+    const tol = fit.cell * 0.5;
+    for (const c of centers) {
+      let best = null, bestD = Infinity;
+      for (const b of blobs) {
+        const d = Math.hypot(b.cx - c.xy[0], b.cy - c.xy[1]);
+        if (d < bestD) { bestD = d; best = b; }
+      }
+      let rgb = null;
+      if (best && bestD <= tol && best.size > fit.cell * 0.35 && best.size < fit.cell * 1.6) {
+        rgb = best.rgb;
+      } else if (this.goodFrames >= 2 && fit.score >= 0.62) {
+        // no patch here (glare, a shadow, two stickers merged): read the pixels
+        // under the grid instead, now that we trust where the grid is
+        rgb = patchColor(data, w, h, c.xy[0], c.xy[1], Math.max(1, fit.cell * 0.18));
+      }
+      if (!rgb) continue;
+      const list = this.votes.get(c.key) || [];
+      list.push(rgb);
+      if (list.length > 6) list.shift();
+      this.votes.set(c.key, list);
+      if (list.length >= this.votesNeeded) {
+        const mean = [0, 1, 2].map((k) => list.reduce((s, v) => s + v[k], 0) / list.length);
+        const worst = Math.max(...list.map((v) => Math.hypot(v[0] - mean[0], v[1] - mean[1], v[2] - mean[2])));
+        if (worst < this.tolerance) this.locked.set(c.key, mean);
+        else list.shift();   // readings disagree: drop the oldest and keep looking
+      }
+    }
+    const read = this.read;
+    return {
+      blobs: blobs.length, fit, read, centers,
+      message: read === 27 ? "¡Las 27 leídas!" : `Leídas ${read} de 27 · mueve un poco el cubo si alguna se resiste`,
+    };
+  }
+
+  colors() {
+    return Object.fromEntries(this.locked);
+  }
+}

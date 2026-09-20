@@ -160,12 +160,13 @@ export const INFO = {
       <p>Hacen falta <b>dos fotos</b>: cada una muestra tres caras, y entre las dos se ven las seis.</p>
       <h4>Se dispara sola</h4>
       <ul>
-        <li>Mientras enfocas, la aplicación analiza cada fotograma y <b>busca el cubo</b>: el hexágono
-        se mueve y gira hasta encajar en él, así que no hace falta que lo coloques con precisión.</li>
-        <li>La barra de abajo dice cómo va. <span style="color:var(--bad)">Roja</span>: no encuentra el
-        cubo. <span style="color:#d29b00">Ámbar</span>: casi. <span style="color:var(--good)">Verde</span>:
-        listo, y en cuanto lo sostengas quieto un instante, hace la foto.</li>
-        <li>Los círculos pequeños muestran el color que está leyendo en cada pegatina.</li>
+        <li>La aplicación <b>busca las pegatinas</b> en la imagen, estén donde estén: no tienes que
+        encajar el cubo en ninguna guía. Cuando lo encuentra, dibuja su contorno en verde.</li>
+        <li>Cada pegatina que consigue leer se marca con un círculo de su color. Las que aún no ha
+        leído se quedan huecas.</li>
+        <li>La barra cuenta cuántas lleva. <b>Al llegar a 27 hace la foto sola.</b></li>
+        <li>Si alguna se resiste (un brillo, una sombra), mueve un poco el cubo o cambia el ángulo:
+        cada pegatina se da por buena cuando se lee varias veces con el mismo color.</li>
         <li>Si prefieres disparar tú, quita «Captura automática» y usa «Capturar ahora».</li>
       </ul>
       <h4>Paso a paso</h4>

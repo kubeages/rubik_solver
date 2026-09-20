@@ -10,12 +10,15 @@ camera (or upload two photos), confirm each move as you make it, and watch the p
 
 ## ✨ Features
 
-- **Camera or photo input.** Two pictures, each showing three faces with a corner pointing at the
-  camera. Seven draggable handles fit the hexagonal silhouette, a per-face homography maps the
-  3×3 grids (perspective included), and the 54 samples are clustered around the six centre
-  colours with a balanced assignment (9 stickers per colour). If the result is an impossible cube,
-  the most doubtful stickers are swapped until it is valid (this catches the usual red/orange mix-ups).
-  Manual painting and a random demo cube are also available.
+- **The camera finds the cube by itself.** No guide to line up with: sticker-sized patches of
+  uniform colour are segmented out of the frame, and a scaled-orthographic camera is fitted so the
+  cube's 27 sticker centres land on them (`static/js/detect.js`). Readings accumulate over frames
+  until all 27 stickers of that view have been seen several times with the same colour, and then
+  the photo is taken automatically. Uploaded photos go through the same detector.
+  The 54 samples are clustered around the six centre colours with a balanced assignment (9 stickers
+  per colour); if the result is an impossible cube, the most doubtful stickers are swapped until it
+  is valid, which catches the usual red/orange mix-ups. Manual painting and a random demo cube are
+  also available.
 - **Two ways to solve:**
   - **Learning mode (layer by layer).** 7 stages; each stage is a small explicit graph (the white
     cross has 190,080 vertices) whose edges are single turns or whole algorithms (macro-operators).
@@ -159,7 +162,7 @@ plus the gitignored `route.local.yaml` on the cluster.
 ├── templates/index.html
 ├── static/
 │   ├── css/app.css
-│   └── js/                  # app.js, capture.js, cube3d.js, graphs.js, cubemodel.js
+│   └── js/                  # app.js, capture.js, detect.js, cube3d.js, graphs.js, cubemodel.js
 ├── templates/login.html
 ├── tests/                   # pytest
 ├── Dockerfile
