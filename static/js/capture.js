@@ -332,6 +332,7 @@ export class Capture {
     els.retake.addEventListener("click", () => this.startCamera());
     els.use.addEventListener("click", () => this.useView());
     els.cancel.addEventListener("click", () => { this.stop(); this.onCancel(); });
+    if (els.diag) els.diag.addEventListener("click", () => this.saveFrame());
     els.file.addEventListener("change", (e) => {
       const f = e.target.files[0];
       e.target.value = "";
@@ -436,7 +437,7 @@ export class Capture {
     const [w, h] = this.size;
     if (!this._scratch) this._scratch = document.createElement("canvas");
     // enough pixels for the stickers to survive, not so many that it drags
-    const sw = Math.min(w, 480), sh = Math.round((sw * h) / w);
+    const sw = Math.min(w, 320), sh = Math.round((sw * h) / w);
     if (this._scratch.width !== sw) { this._scratch.width = sw; this._scratch.height = sh; }
     const ctx = this._scratch.getContext("2d", { willReadFrequently: true });
     ctx.drawImage(v, 0, 0, sw, sh);
@@ -486,6 +487,26 @@ export class Capture {
       `<span class="quality-msg">${msg}</span>`;
   }
 
+  // Save what the camera is seeing right now, so a frame that defeats the
+  // detector can be looked at afterwards.
+  saveFrame() {
+    const v = this.els.video;
+    const w = v.videoWidth, h = v.videoHeight;
+    if (!w) return;
+    const c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    c.getContext("2d").drawImage(v, 0, 0, w, h);
+    const a = document.createElement("a");
+    a.download = `rubik-diagnostico-${Date.now()}.jpg`;
+    a.href = c.toDataURL("image/jpeg", 0.92);
+    a.click();
+    const read = this.tracker ? this.tracker.read : 0;
+    const fit = this.tracker && this.tracker.lastFit;
+    this.els.hint.textContent =
+      `Foto guardada en tus descargas (leídas ${read} de 27` +
+      (fit ? `, ajuste ${fit.score.toFixed(2)}` : ", sin cubo detectado") + ").";
+  }
+
   _flash() {
     const wrap = this.els.canvas.parentElement;
     wrap.classList.add("flash");
@@ -503,6 +524,7 @@ export class Capture {
   _showButtons(state) {
     const e = this.els;
     e.shoot.hidden = state !== "camera";
+    if (e.diag) e.diag.hidden = state !== "camera";
     if (e.autoToggle) e.autoToggle.parentElement.hidden = state !== "camera";
     e.uploadLabel.hidden = state === "adjust";
     e.retake.hidden = !(state === "adjust" && this.mode === "camera");
@@ -574,7 +596,7 @@ export class Capture {
   // Look for the cube in a still picture (an upload), the same way as in the
   // live preview.
   _detectStill(w, h) {
-    const sw = Math.min(w, 640), sh = Math.round((sw * h) / w);
+    const sw = Math.min(w, 320), sh = Math.round((sw * h) / w);
     const c = document.createElement("canvas");
     c.width = sw; c.height = sh;
     const ctx = c.getContext("2d", { willReadFrequently: true });

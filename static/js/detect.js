@@ -23,8 +23,74 @@ export function poseHandles(cx, cy, r, theta) {
 // Sticker-like patches
 // ---------------------------------------------------------------------------
 
-export function segmentBlobs(data, w, h, { minArea = 12, maxArea = 0.06 } = {}) {
+// A gentle 3x3 average: sensor noise and the speckle of a glossy sticker make
+// the patches ragged, and the shapes are what we are about to measure.
+export function smooth(data, w, h) {
+  const src = new Uint8ClampedArray(data);
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const k = (y * w + x) * 4;
+      for (let c = 0; c < 3; c++) {
+        let sum = 0;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          sum += src[k + c + (dy * w + dx) * 4];
+        }
+        data[k + c] = sum / 9;
+      }
+    }
+  }
+}
+
+// Stretch the frame so a washed-out picture (a bright room, a phone that
+// over-exposes) gets its contrast back before anything else is measured.
+// Each channel is mapped from its own 2nd..98th percentile, which also
+// evens out the colour of the light.
+export function normalize(data, w, h) {
   const n = w * h;
+  const hist = [new Uint32Array(256), new Uint32Array(256), new Uint32Array(256)];
+  const step = n > 120000 ? 2 : 1;        // sampling is plenty for percentiles
+  let count = 0;
+  for (let p = 0; p < n; p += step) {
+    const k = p * 4;
+    hist[0][data[k]]++; hist[1][data[k + 1]]++; hist[2][data[k + 2]]++;
+    count++;
+  }
+  const map = [];
+  let needed = false;
+  for (let c = 0; c < 3; c++) {
+    const lowCut = count * 0.02, highCut = count * 0.98;
+    let acc = 0, lo = 0, hi = 255;
+    for (let v = 0; v < 256; v++) { acc += hist[c][v]; if (acc >= lowCut) { lo = v; break; } }
+    acc = 0;
+    for (let v = 0; v < 256; v++) { acc += hist[c][v]; if (acc >= highCut) { hi = v; break; } }
+    if (hi - lo < 25) { lo = 0; hi = 255; }
+    if (lo > 8 || hi < 247) needed = true;
+    const table = new Uint8Array(256);
+    for (let v = 0; v < 256; v++) {
+      table[v] = Math.max(0, Math.min(255, Math.round(((v - lo) * 255) / (hi - lo))));
+    }
+    map.push(table);
+  }
+  if (!needed) return false;
+  for (let p = 0; p < n; p++) {
+    const k = p * 4;
+    data[k] = map[0][data[k]];
+    data[k + 1] = map[1][data[k + 1]];
+    data[k + 2] = map[2][data[k + 2]];
+  }
+  return true;
+}
+
+// maxArea is generous on purpose: held close to the camera a single sticker
+// can cover a good part of the frame, and dropping those left nothing to find.
+// `colorFrom` lets the shapes be found on a contrast-stretched copy while the
+// colours are still read from the original pixels, which is what the rest of
+// the pipeline compares between the two views.
+export function segmentBlobs(data, w, h, { minArea = 10, maxArea = 0.16, split = false, colorFrom = null } = {}) {
+  const src = colorFrom || data;
+  const n = w * h;
+  const drift = split ? 60 : 95;
+  const edgeJump = split ? 40 : 60;
   const seen = new Uint8Array(n);
   const blobs = [];
   const queue = new Int32Array(n);
@@ -40,13 +106,12 @@ export function segmentBlobs(data, w, h, { minArea = 12, maxArea = 0.06 } = {}) 
     let head = 0, tail = 0;
     queue[tail++] = start;
     seen[start] = 1;
-    let sum = [0, 0, 0], count = 0;
+    let count = 0;
     let minX = w, maxX = 0, minY = h, maxY = 0, sx = 0, sy = 0;
     while (head < tail) {
       const p = queue[head++];
       const k = p * 4;
       const x = p % w, y = (p / w) | 0;
-      sum[0] += data[k]; sum[1] += data[k + 1]; sum[2] += data[k + 2];
       sx += x; sy += y; count++;
       if (x < minX) minX = x;
       if (x > maxX) maxX = x;
@@ -58,8 +123,12 @@ export function segmentBlobs(data, w, h, { minArea = 12, maxArea = 0.06 } = {}) 
         const j = q * 4;
         // stop at the dark line between stickers, judged against this patch
         if (luma(q) < edge) { seen[q] = 1; return; }
+        // stop at a sharp edge, which is what separates two bright stickers
+        // when the light is strong enough to wash the line between them out
+        if (Math.abs(data[j] - data[k]) + Math.abs(data[j + 1] - data[k + 1]) +
+            Math.abs(data[j + 2] - data[k + 2]) > edgeJump) return;
         // and grow only while the colour stays close to where the patch started
-        if (Math.abs(data[j] - r0) + Math.abs(data[j + 1] - g0) + Math.abs(data[j + 2] - b0) > 78) return;
+        if (Math.abs(data[j] - r0) + Math.abs(data[j + 1] - g0) + Math.abs(data[j + 2] - b0) > 95) return;
         seen[q] = 1;
         queue[tail++] = q;
       };
@@ -73,10 +142,24 @@ export function segmentBlobs(data, w, h, { minArea = 12, maxArea = 0.06 } = {}) 
     const aspect = bw / bh;
     if (aspect < 0.55 || aspect > 1.8) continue;
     if (count / (bw * bh) < 0.55) continue;              // not a solid patch
+    const cx = sx / count, cy = sy / count;
+    // Colour from the middle of the patch only: its border blurs into the
+    // black line around the sticker, and averaging that in drags the colour
+    // towards grey.
+    const inner = 0.55 * Math.sqrt(count / Math.PI);
+    let cr = 0, cg = 0, cb = 0, cn = 0;
+    for (let t = 0; t < tail; t++) {
+      const p = queue[t];
+      const dx = (p % w) - cx, dy = ((p / w) | 0) - cy;
+      if (dx * dx + dy * dy > inner * inner) continue;
+      const k = p * 4;
+      cr += src[k]; cg += src[k + 1]; cb += src[k + 2]; cn++;
+    }
+    if (!cn) continue;
     blobs.push({
-      cx: sx / count, cy: sy / count, area: count,
+      cx, cy, area: count,
       size: Math.sqrt(count / 0.87),                     // side of a rhombic sticker
-      rgb: [sum[0] / count, sum[1] / count, sum[2] / count],
+      rgb: [cr / cn, cg / cn, cb / cn],
     });
   }
   return blobs;
@@ -618,8 +701,25 @@ export class Tracker {
 
   // One frame: returns what was seen, and grows the readings.
   update(data, w, h) {
-    const blobs = segmentBlobs(data, w, h);
-    const fit = fitCube(this.model, blobs, w, h, this.pose, data);
+    // shapes are looked for on a contrast-stretched copy (a bright room washes
+    // the cube out), colours are always read from the original pixels
+    const shapes = new Uint8ClampedArray(data);
+    smooth(shapes, w, h);
+    normalize(shapes, w, h);
+    const minArea = Math.max(10, Math.round((w * h) / 20000));
+    let blobs = segmentBlobs(shapes, w, h, { minArea, colorFrom: data });
+    let fit = fitCube(this.model, blobs, w, h, this.pose, shapes);
+    if (!fit || fit.score < 0.72) {
+      // patches may have merged (a strong light washes the line between two
+      // pale stickers out): split more eagerly and keep whichever grid fits
+      // better. Counting patches is not a good enough test: splitting always
+      // makes more of them, and fragments read the wrong colour.
+      const alt = segmentBlobs(shapes, w, h, { minArea, split: true, colorFrom: data });
+      if (alt.length >= 9) {
+        const altFit = fitCube(this.model, alt, w, h, this.pose, shapes);
+        if (altFit && (!fit || altFit.score > fit.score)) { blobs = alt; fit = altFit; }
+      }
+    }
     this.lastFit = fit;
     if (!fit || fit.score < 0.35) {
       return { blobs: blobs.length, fit: null, read: this.read, message: blobs.length < 8
