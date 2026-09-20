@@ -89,7 +89,7 @@ HASH=$(python -c "from werkzeug.security import generate_password_hash as g; pri
 oc create secret generic rubik-solver-auth \
   --from-literal=AUTH_USER=you --from-literal=AUTH_PASSWORD_HASH="$HASH"
 
-# 3. Deploy, then set the real route host
+# 3. Deploy, then create the Route with your own host
 oc apply -k k8s/overlays/openshift/
 cp k8s/overlays/openshift/route.local.yaml.example k8s/overlays/openshift/route.local.yaml
 #   edit the host, then:

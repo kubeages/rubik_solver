@@ -3,9 +3,11 @@ kind: Kustomization
 
 namespace: rubik-solver
 
+# The Route is not managed here on purpose: its host is site-specific, so it
+# lives in the gitignored route.local.yaml (see route.local.yaml.example).
+# Keeping it out of the overlay means re-applying never overwrites your host.
 resources:
   - ../../base
-  - route.yaml
 
 images:
   - name: rubik-solver

@@ -1,14 +1,12 @@
-# Copy to route.local.yaml and set your real host. route.local.yaml is gitignored.
+# Copy to route.local.yaml, set your real host(s), and apply it after the
+# kustomize deploy. route.local.yaml is gitignored, and the overlay does not
+# manage Routes, so re-applying the overlay never overwrites your host.
 #
-# Apply after the main kustomize deploy:
 #   oc apply -k k8s/overlays/openshift/
 #   oc apply -f k8s/overlays/openshift/route.local.yaml
 #
-# Or patch in place:
-#   oc patch route/rubik-solver --type=merge \
-#     -p '{"spec":{"host":"rubik-solver.your-cluster.example.com"}}'
-#
 # The camera only works over HTTPS, so keep the edge TLS termination.
+# Add a second Route (as below) if you also publish the app on another domain.
 
 apiVersion: route.openshift.io/v1
 kind: Route
