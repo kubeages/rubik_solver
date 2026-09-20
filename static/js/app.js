@@ -1,5 +1,6 @@
 import { COLORS, COLOR_KEYS, CubeModel, STANDARD_SCHEME } from "./cubemodel.js";
-import { Capture, assemble, assembleDoubtful, VIEW2_COUNT } from "./capture.js";
+import { Capture, assemble, assembleDoubtful, classify, VIEW2_COUNT } from "./capture.js";
+import { FaceScan, STEPS } from "./facescan.js";
 import { StickerGraph, drawNeighbors, drawLevels, drawPath, drawCaptureGuide } from "./graphs.js";
 import { INFO, attachInfoButtons, techLines } from "./info.js";
 
@@ -181,8 +182,87 @@ function initCapture() {
 
 function startCapture(mode) {
   show("capture");
-  app.captureCtl.begin(mode);
+  // the sidebar explains whichever way of scanning is in use
+  $("guide-faces").hidden = mode !== "camera";
+  $("guide-corner").hidden = mode === "camera";
+  $("preview-hint").textContent = mode === "camera"
+    ? "Las caras que aún no ha leído salen en gris."
+    : "Las pegatinas que aún no ha leído salen en gris.";
+  if (mode === "camera") {
+    ensureFaceScan();
+    app.faceCtl.begin();
+  } else {
+    app.captureCtl.begin(mode);
+  }
   ensureCapturePreview();
+}
+
+// Camera scanning goes face by face: a flat 3x3 grid is far easier to read
+// than three faces at once, which is what kept failing on real cubes.
+function ensureFaceScan() {
+  if (app.faceCtl) return;
+  app.faceCtl = new FaceScan(app.model, {
+    title: $("capture-title"), instructions: $("capture-instructions"), video: $("capture-video"),
+    canvas: $("capture-canvas"), overlay: $("capture-overlay"), shoot: $("btn-shoot"),
+    uploadLabel: $("btn-upload-label"), retake: $("btn-retake"), use: $("btn-use"),
+    cancel: $("btn-capture-cancel"), hint: $("capture-hint"), quality: $("capture-quality"),
+    autoToggle: $("auto-toggle"), diag: $("btn-diag"), manual: $("btn-manual"),
+    onStep: (step, faces) => updateFacePreview(faces, step),
+  }, {
+    onDone: (faces) => {
+      app.colors = facesToColors(faces);
+      app.capture = null;
+      app.doubtful = new Set();
+      openReview();
+    },
+    onCancel: () => show(app.plan ? "solve" : "home"),
+    onFrame: ({ faces, current, step }) => updateFacePreview(faces, step, current),
+  });
+}
+
+// The nine colours of each face land straight on the cube's own layout,
+// because the order the steps ask for keeps the same face up throughout.
+// What the camera read are raw colours, so they still have to be sorted into
+// the six of the cube, anchored on the centres and nine of each.
+function facesToColors(faces) {
+  const samples = {};
+  const centreIds = [];
+  "URFDLB".split("").forEach((f, k) => {
+    const nine = faces[f];
+    for (let i = 0; i < 9; i++) {
+      const id = String(k * 9 + i);
+      samples[id] = nine && nine[i] ? nine[i] : [128, 128, 128];
+      if (i === 4) centreIds.push(id);
+    }
+  });
+  const { colors } = classify(samples, centreIds);
+  return Array.from({ length: 54 }, (_, i) => colors[String(i)]);
+}
+
+function updateFacePreview(faces, step, current) {
+  const badge = $("preview-count");
+  const done = Object.keys(faces || {}).length;
+  if (badge) badge.textContent = `${done} de 6 caras`;
+  const chips = $("face-progress");
+  if (chips) {
+    const order = STEPS.map((s) => s.face);
+    [...chips.children].forEach((chip, i) => {
+      chip.hidden = i >= 6;
+      const f = order[i];
+      chip.firstChild.textContent = STEPS[i].name.replace("de ", "").replace("la ", "");
+      const n = faces[f] ? 9 : (i === step && current ? current.filter(Boolean).length : 0);
+      chip.querySelector("b").textContent = `${n}/9`;
+      chip.classList.toggle("done", n === 9);
+    });
+  }
+  if (!app.preview) return;
+  const painted = new Array(54).fill(UNREAD);
+  "URFDLB".split("").forEach((f, k) => {
+    const nine = faces[f];
+    if (!nine) return;
+    for (let i = 0; i < 9; i++) painted[k * 9 + i] = nine[i];
+  });
+  app.preview.setColors(painted);
 }
 
 // A cube next to the camera showing, live, the stickers already read. The

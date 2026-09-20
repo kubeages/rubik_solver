@@ -155,45 +155,32 @@ export const INFO = {
   },
 
   capture: {
-    title: "Cómo hacer las fotos",
+    title: "Cómo se lee tu cubo",
     html: `
-      <p>Hacen falta <b>dos fotos</b>: cada una muestra tres caras, y entre las dos se ven las seis.</p>
-      <h4>Se dispara sola</h4>
+      <p>Con la cámara, el cubo se lee <b>cara a cara</b>: seis pasos, cada uno con una cara de
+      frente. Es mucho más fiable que intentar leer tres caras a la vez desde una esquina, que es
+      como empezó y no funcionaba con cubos reales.</p>
+      <h4>Cómo funciona cada paso</h4>
       <ul>
-        <li><b>Ve girando el cubo muy poco a poco.</b> No hace falta una postura perfecta: cada
-        ángulo nuevo deja leer unas cuantas pegatinas más, y se van acumulando. El cubo de al lado
-        te enseña cuáles llevas y los recuadros marcan cuántas van de cada cara.</li>
-        <li>La aplicación <b>busca las pegatinas</b> en la imagen, estén donde estén: no tienes que
-        encajar el cubo en ninguna guía. Cuando lo encuentra, dibuja su contorno en verde.</li>
-        <li>Cada pegatina que consigue leer se marca con un círculo de su color. Las que aún no ha
-        leído se quedan huecas.</li>
-        <li>La barra cuenta cuántas lleva. <b>Al llegar a 27 hace la foto sola</b>, siempre que la
-        cuadrícula esté bien encajada: si no lo está, te lo dice en vez de dar por buenos colores
-        que no ha leído bien.</li>
-        <li>Si alguna se resiste (un brillo, una sombra), mueve un poco el cubo o cambia el ángulo:
-        cada pegatina se da por buena cuando se lee varias veces con el mismo color.</li>
-        <li>Si prefieres disparar tú, quita «Captura automática» y usa «Capturar ahora».</li>
-        <li><b>¿No hay manera?</b> Pulsa «Ajustar a mano»: congela la imagen y colocas tú los 7
-        puntos sobre las esquinas del cubo. Es el camino que funciona siempre, y son diez segundos.
-        Si pasan unos segundos sin encontrarlo, la aplicación te lleva ahí sola.</li>
+        <li>Enseña la cara <b>de frente</b>, llenando buena parte de la imagen. La aplicación
+        busca las 9 pegatinas, las marca con su color y <b>pasa sola</b> a la siguiente cara.</li>
+        <li>Cada pegatina se da por buena cuando se lee varias veces igual, así que un fotograma
+        movido no cuenta.</li>
+        <li>Si te adelantas y aún no has girado el cubo, te avisa: no guarda dos veces la misma cara.</li>
+        <li>Si una pegatina se resiste (un reflejo encima), mueve un poco el cubo. Pasados unos
+        segundos la lee igualmente del sitio donde la cuadrícula dice que está.</li>
       </ul>
-      <h4>Paso a paso</h4>
+      <h4>El orden de las caras</h4>
       <ul>
-        <li><b>Foto 1:</b> apunta a la cámara con la esquina de arriba-delante-derecha. Se ven las
-        caras de arriba, delante y derecha.</li>
-        <li><b>Foto 2:</b> dale la vuelta al cubo para que apunte a la cámara la <b>esquina
-        opuesta</b>, la que estaba abajo-atrás-izquierda. Da igual cómo lo gires mientras sea esa
-        esquina: la aplicación deduce la orientación.</li>
-        <li>Encaja el cubo dentro del hexágono y procura que lo llene casi entero.</li>
+        <li>Primero las cuatro laterales, girando <b>siempre en el mismo sentido</b> y manteniendo
+        arriba la misma cara. Luego arriba y abajo, inclinando el cubo.</li>
+        <li>Ese orden es el que hace que cada cara caiga en su sitio del cubo sin preguntarte nada.</li>
       </ul>
-      <h4>Si los colores no se leen bien</h4>
-      <ul>
-        <li><b>Arrastra los siete puntos azules</b> hasta las esquinas del cubo. Los círculos
-        pequeños enseñan el color que se está leyendo en cada adhesivo.</li>
-        <li>Luz uniforme y sin reflejos. El brillo del plástico es lo que más confunde, sobre todo
-        entre rojo y naranja.</li>
-        <li>Da igual si sale imperfecto: en la pantalla siguiente puedes corregir a mano.</li>
-      </ul>`,
+      <h4>Si una cara no hay manera</h4>
+      <p><b>Ajustar a mano</b> congela la imagen y colocas las 4 esquinas de la cara; los círculos
+      te enseñan el color que lee cada pegatina. A los 18 segundos te lleva ahí solo.</p>
+      <p class="hint">Subiendo fotos en vez de usar la cámara, se siguen pidiendo dos fotos con una
+      esquina apuntando a la cámara, con el mismo ajuste manual si hace falta.</p>`,
   },
 
   review: {

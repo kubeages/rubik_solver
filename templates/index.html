@@ -106,16 +106,31 @@
           <span data-face="top">Arriba <b>0/9</b></span>
           <span data-face="left">Delante <b>0/9</b></span>
           <span data-face="right">Derecha <b>0/9</b></span>
+          <span data-face="f4" hidden>— <b>0/9</b></span>
+          <span data-face="f5" hidden>— <b>0/9</b></span>
+          <span data-face="f6" hidden>— <b>0/9</b></span>
         </div>
-        <p class="hint">Las grises aún no están leídas. <b>Ve girando el cubo muy poco a poco</b>
-        hasta que las tres caras estén completas: cada ángulo nuevo deja ver mejor unas cuantas.</p>
-        <h3>¿Qué caras deben verse?</h3>
-        <svg id="capture-guide-svg" viewBox="-60 -60 120 120"></svg>
-        <ol class="guide-list">
-          <li><b>No hay que encajar el cubo en ningún sitio:</b> la aplicación lo busca en la imagen, marca cada pegatina que va leyendo y dispara al llegar a 27.</li>
-          <li><b>Foto 1:</b> la esquina de arriba-delante-derecha apunta a la cámara. Se ven arriba, delante y derecha.</li>
-          <li><b>Foto 2:</b> dale la vuelta al cubo para que ahora apunte a la cámara la esquina opuesta (la de abajo-atrás-izquierda). Se ven las tres caras que faltaban.</li>
-        </ol>
+        <p class="hint" id="preview-hint">Las caras que aún no ha leído salen en gris.</p>
+        <div id="guide-faces">
+          <h3>Cómo girar el cubo</h3>
+          <ol class="guide-list">
+            <li>Enseña una cara <b>de frente</b>, llenando buena parte de la imagen. En cuanto lea
+            sus 9 pegatinas, pasa sola a la siguiente.</li>
+            <li>Las cuatro laterales se piden girando siempre <b>en el mismo sentido</b>, y
+            manteniendo arriba la misma cara.</li>
+            <li>Al final te pide la de <b>arriba</b> y la de <b>abajo</b>, inclinando el cubo.</li>
+            <li>Si una pegatina se resiste por un reflejo, <b>mueve un poco el cubo</b>. Y si esa
+            cara no hay manera, «Ajustar a mano» te deja colocar las 4 esquinas.</li>
+          </ol>
+        </div>
+        <div id="guide-corner" hidden>
+          <h3>¿Qué caras deben verse?</h3>
+          <svg id="capture-guide-svg" viewBox="-60 -60 120 120"></svg>
+          <ol class="guide-list">
+            <li><b>Foto 1:</b> una esquina apuntando a la cámara; se ven arriba, delante y derecha.</li>
+            <li><b>Foto 2:</b> dale la vuelta al cubo para que apunte a la cámara la esquina opuesta.</li>
+          </ol>
+        </div>
         <p class="hint">Consejo: luz uniforme y sin reflejos fuertes. Cuanto más grande se vea el cubo, mejor lee los colores.</p>
       </aside>
     </div>
