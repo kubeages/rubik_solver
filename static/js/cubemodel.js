@@ -51,8 +51,16 @@ export class CubeModel {
 
   // Same checks as the server (cube/model.py validate), used to repair photo reads.
   isValid(colors) {
+    return this.diagnose(colors).ok;
+  }
+
+  // What, exactly, is wrong with this cube. Knowing which of the three
+  // invariants fails is what lets a bad reading be repaired on purpose
+  // instead of by trial and error.
+  diagnose(colors) {
+    const bad = (why) => ({ ok: false, why, twist: 0, flip: 0, parityOff: false });
     const f = this.toFacelets(colors);
-    if (f.includes("?")) return false;
+    if (f.includes("?")) return bad("colores");
     const solved = this.meta.solved;
     const CF = this.meta.corner_facelets, EF = this.meta.edge_facelets;
     const cornerCols = CF.map((fs) => fs.map((i) => solved[i]));
@@ -61,10 +69,10 @@ export class CubeModel {
     for (const fs of CF) {
       const cols = fs.map((i) => f[i]);
       const ori = cols.findIndex((c) => c === "U" || c === "D");
-      if (ori < 0) return false;
+      if (ori < 0) return bad("esquina");
       const c1 = cols[(ori + 1) % 3], c2 = cols[(ori + 2) % 3];
       const j = cornerCols.findIndex((cc) => cc[1] === c1 && cc[2] === c2);
-      if (j < 0) return false;
+      if (j < 0) return bad("esquina");
       cp.push(j); co.push(ori);
     }
     for (const fs of EF) {
@@ -72,13 +80,16 @@ export class CubeModel {
       let j = edgeCols.findIndex((ec) => ec[0] === cols[0] && ec[1] === cols[1]);
       if (j >= 0) { ep.push(j); eo.push(0); continue; }
       j = edgeCols.findIndex((ec) => ec[0] === cols[1] && ec[1] === cols[0]);
-      if (j < 0) return false;
+      if (j < 0) return bad("arista");
       ep.push(j); eo.push(1);
     }
-    if (new Set(cp).size !== 8 || new Set(ep).size !== 12) return false;
-    if (co.reduce((a, b) => a + b, 0) % 3 || eo.reduce((a, b) => a + b, 0) % 2) return false;
+    if (new Set(cp).size !== 8) return bad("esquinas repetidas");
+    if (new Set(ep).size !== 12) return bad("aristas repetidas");
     const parity = (p) => { let s = 0; for (let i = 0; i < p.length; i++) for (let j = 0; j < i; j++) if (p[j] > p[i]) s++; return s % 2; };
-    return parity(cp) === parity(ep);
+    const twist = co.reduce((a, b) => a + b, 0) % 3;
+    const flip = eo.reduce((a, b) => a + b, 0) % 2;
+    const parityOff = parity(cp) !== parity(ep);
+    return { ok: !twist && !flip && !parityOff, why: "", twist, flip, parityOff };
   }
 
   isSolved(colors) {

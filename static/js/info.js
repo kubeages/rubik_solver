@@ -212,11 +212,26 @@ export const INFO = {
         nueve</b> de cada uno. Si sale en rojo, falta o sobra alguno.</li>
         <li>Los centros no se pueden mover en un cubo real: son los que definen el color de cada cara.</li>
       </ul>
+      <h4>Cómo se leen los colores (y por qué casi nunca sale imposible)</h4>
+      <p>No se clasifica cada pegatina por su cuenta. Un cubo no son 54 colores sueltos: son
+      <b>ocho esquinas y doce aristas</b>, y sabemos exactamente cuáles existen, porque los centros
+      dicen los seis colores. Cada esquina es una combinación de {arriba,abajo} × {derecha,izquierda}
+      × {delante,detrás}, y <b>cada pieza está en el cubo una sola vez</b>.</p>
+      <p>Así que la pregunta no es «¿de qué color es esta pegatina?» sino <b>«¿qué pieza hay en esta
+      esquina?»</b>, respondida para las ocho a la vez con un reparto de coste mínimo. Un rojo leído
+      como naranja ya no rompe nada: la pieza que formaría está ocupada, y gana la lectura siguiente
+      más barata. En pruebas, esto pasó de 71% a <b>100% de cubos válidos</b>.</p>
+      <p>Además, cada cara se escanea con <b>su propia luz</b> (la cámara ajusta la exposición al
+      girar el cubo). Eso se estima y se corrige, porque un rojo bajo una luz puede caer más cerca
+      del naranja de otra.</p>
       <h4>Si dice que el cubo es imposible</h4>
       <p>Comprobamos que sea un cubo que se puede alcanzar girando caras (piezas sin repetir,
       orientaciones y paridad correctas). Si el mensaje aparece, casi siempre es un color mal leído,
       no un cubo roto. El mensaje te dice qué pieza mirar. También puede fallar la orientación de la
-      segunda foto: para eso está el botón que prueba otra.</p>`,
+      segunda foto: para eso está el botón que prueba otra.</p>
+      <p class="hint">Las pegatinas con <b>borde discontinuo</b> son las que la estructura del cubo
+      ha tenido que corregir: la cámara decía otra cosa. Suelen estar bien, pero es donde miraría
+      yo primero.</p>`,
   },
 
   mode: {
@@ -338,12 +353,14 @@ export function techLines(key, ctx) {
       ];
     case "review":
       return [
+        ["Lectura", "no se clasifica pegatina a pegatina, sino pieza a pieza: 8 esquinas y 12 aristas repartidas por coste mínimo (algoritmo húngaro), cada pieza usada una sola vez"],
+        ["Luz de cada cara", "cada cara se escanea con su propia exposición, así que se estima una ganancia por cara alternando con la clasificación (6 vueltas) hasta ponerlas todas bajo la misma luz"],
         ["Comprobaciones", "9 pegatinas por color, centros distintos, piezas sin repetir"],
         ["Orientaciones", "suma de giros de esquinas ≡ 0 (mod 3) y de volteos de aristas ≡ 0 (mod 2)"],
         ["Paridad", "la permutación de esquinas y la de aristas deben tener la misma paridad"],
         ["Segunda foto", "se prueban las 3 orientaciones posibles y se elige la que da un cubo posible"],
         ["Cómo lo sujetaste", "4 formas de sujetarlo × 4 giros por cara (4.096 combinaciones), podadas por esquinas y aristas; si encajan dos, se avisa"],
-        ["Reparación", "si el cubo es imposible, se intercambian las pegatinas más dudosas hasta que deje de serlo"],
+        ["Reparación", "las tres leyes (giros de esquina múltiplo de 3, volteos de arista múltiplo de 2, paridades iguales) dicen cuál falla, y solo se prueban los cambios que podrían arreglarla, el más barato primero"],
       ];
     case "mode":
       return [

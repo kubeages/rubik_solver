@@ -1,5 +1,6 @@
 import { COLORS, COLOR_KEYS, CubeModel, STANDARD_SCHEME } from "./cubemodel.js";
 import { Capture, assemble, assembleDoubtful, classify, VIEW2_COUNT } from "./capture.js";
+import { readPieces } from "./pieces.js";
 import { FaceScan, STEPS } from "./facescan.js";
 import { StickerGraph, drawNeighbors, drawLevels, drawPath, drawCaptureGuide } from "./graphs.js";
 import { INFO, attachInfoButtons, techLines } from "./info.js";
@@ -213,10 +214,11 @@ function ensureFaceScan() {
       app.orientedFaces = 0;
       app.rearranged = null;
       app.ambiguous = false;
+      app.overruled = [];
       app.repairedStickers = 0;
-      app.colors = facesToColors(faces);
-      app.capture = null;
       app.doubtful = new Set();
+      app.capture = null;
+      app.colors = facesToColors(faces);   // this also marks the stickers to check
       openReview();
     },
     onCancel: () => show(app.plan ? "solve" : "home"),
@@ -231,18 +233,34 @@ function ensureFaceScan() {
 function facesToColors(faces) {
   const samples = {};
   const centreIds = [];
+  const lights = {};        // each face was read on its own, under its own light
   "URFDLB".split("").forEach((f, k) => {
     const nine = faces[f];
     for (let i = 0; i < 9; i++) {
       const id = String(k * 9 + i);
       samples[id] = nine && nine[i] ? nine[i] : [128, 128, 128];
+      lights[id] = k;
       if (i === 4) centreIds.push(id);
     }
   });
-  const { colors, margin } = classify(samples, centreIds);
-  const read = Array.from({ length: 54 }, (_, i) => colors[String(i)]);
+  const { colors, margin, lab, prototypes } = classify(samples, centreIds, lights);
+  const centreKeys = centreIds.map((id) => colors[id]);
+  const read = readPieces(lab, prototypes, centreKeys, app.model, app.meta);
+  // Where reading by pieces disagrees with reading each sticker on its own,
+  // the structure of the cube has overruled the camera. It is usually right,
+  // but it is exactly where a mistake would hide, so those stickers are
+  // marked for the user to check.
+  const overruled = [];
+  for (let i = 0; i < 54; i++) if (read[i] !== colors[String(i)]) overruled.push(i);
   const oriented = orientFaces(read);
-  if (app.model.isValid(oriented)) return oriented;
+  if (app.model.isValid(oriented)) {
+    // the marks point at positions, so they only mean anything if the faces
+    // stayed where they were read
+    const moved = oriented.some((c, i) => c !== read[i]);
+    app.overruled = moved ? [] : overruled;
+    app.doubtful = new Set(app.overruled);
+    return oriented;
+  }
   // No way of holding the cube explains these colours, so one of them is
   // wrong. Red against orange, white against yellow under a warm light: the
   // doubtful ones are swapped in pairs until the cube makes sense.
@@ -543,6 +561,16 @@ async function runValidate() {
     } else if (r.ok) {
       st.className = "review-status ok";
       const doubts = app.doubtful ? app.doubtful.size : 0;
+      const overruled = app.overruled ? app.overruled.length : 0;
+      if (overruled && !app.repairedStickers) {
+        st.textContent = `✓ Es un cubo válido. ${overruled === 1 ? "Una pegatina no cuadraba" :
+          `${overruled} pegatinas no cuadraban`} con ninguna pieza posible y ${overruled === 1 ?
+          "la he corregido" : "las he corregido"} (${overruled === 1 ? "va marcada" : "van marcadas"} ` +
+          `abajo con borde discontinuo): compruébal${overruled === 1 ? "a" : "as"} antes de seguir.`;
+        $("btn-solve").disabled = false;
+        renderBasePicker();
+        return;
+      }
       if (app.repairedStickers) {
         st.textContent = "✓ Es un cubo válido, pero he tenido que corregir un par de colores que " +
           "no encajaban (suele pasar entre rojo y naranja, o blanco y amarillo). Échales un ojo abajo antes de seguir.";

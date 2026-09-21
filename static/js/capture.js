@@ -127,7 +127,7 @@ function srgbToLab([r, g, b]) {
   return [116 * Y - 16, 500 * (X - Y), 200 * (Y - Z)];
 }
 
-function labDist(a, b) {
+export function labDist(a, b) {
   // lightness varies a lot with shading, so it weighs less than hue
   return Math.hypot(0.55 * (a[0] - b[0]), a[1] - b[1], a[2] - b[2]);
 }
@@ -144,12 +144,33 @@ function samplePatch(ctx, x, y, r, w, h) {
 }
 
 // samples: {id: rgb}; centreIds: six ids that are centres -> {id: colourKey}
-export function classify(samples, centreIds) {
+//
+// `groups` says which stickers were read under the same light: {id: group}.
+// It matters more than it sounds. Scanning face by face means six separate
+// readings, each with whatever exposure and white balance the camera chose at
+// that moment, and the six are then compared as if they shared a light. On a
+// cube whose red and orange are close to begin with, a red read under one
+// exposure lands nearer the orange of another, and one wrong sticker is
+// enough to make a corner impossible.
+//
+// So the light is worked out along with the colours, going back and forth:
+// classify with the lights as they stand, then give each reading the gain
+// that best carries its own stickers onto the colours they were assigned,
+// then classify again. A few rounds and the six readings sit under one light.
+export function classify(samples, centreIds, groups = null) {
   const ids = Object.keys(samples);
-  const lab = Object.fromEntries(ids.map((id) => [id, srgbToLab(samples[id])]));
+  const groupOf = (id) => (groups ? String(groups[id]) : "one");
+  const groupIds = [...new Set(ids.map(groupOf))];
+  const gain = Object.fromEntries(groupIds.map((g) => [g, [1, 1, 1]]));
+  const lit = (id) => {
+    const g = gain[groupOf(id)];
+    return samples[id].map((v, c) => Math.max(0, Math.min(255, v * g[c])));
+  };
+  let lab = Object.fromEntries(ids.map((id) => [id, srgbToLab(lit(id))]));
   let means = centreIds.map((id) => lab[id]);
   let assign = {};
-  for (let iter = 0; iter < 3; iter++) {
+  const rounds = groups ? 6 : 3;
+  for (let iter = 0; iter < rounds; iter++) {
     // balanced greedy assignment: nine stickers per cluster, centres fixed
     assign = {};
     const count = [0, 0, 0, 0, 0, 0];
@@ -182,6 +203,23 @@ export function classify(samples, centreIds) {
       const mem = ids.filter((id) => assign[id] === k).map((id) => lab[id]);
       return [0, 1, 2].map((c) => mem.reduce((s, v) => s + v[c], 0) / mem.length);
     });
+    if (!groups || iter === rounds - 1) continue;
+    // ...and now the other half: each reading gets the gain that best carries
+    // its stickers onto the colour each was assigned. The median, so that a
+    // sticker assigned the wrong colour cannot drag the whole face with it.
+    const clusterRgb = [0, 1, 2, 3, 4, 5].map((k) => {
+      const mem = ids.filter((id) => assign[id] === k).map((id) => lit(id));
+      return [0, 1, 2].map((c) => mem.reduce((s, v) => s + v[c], 0) / Math.max(1, mem.length));
+    });
+    const median = (a) => { a.sort((p, q) => p - q); return a[a.length >> 1]; };
+    for (const g of groupIds) {
+      const mine = ids.filter((id) => groupOf(id) === g);
+      const step = [0, 1, 2].map((c) =>
+        median(mine.map((id) => (clusterRgb[assign[id]][c] + 6) / (lit(id)[c] + 6))));
+      // one step at a time, and never far: a wild gain would invent colours
+      gain[g] = gain[g].map((v, c) => Math.max(0.55, Math.min(1.8, v * Math.pow(step[c], 0.7))));
+    }
+    lab = Object.fromEntries(ids.map((id) => [id, srgbToLab(lit(id))]));
   }
   // name the clusters: the permutation of colour names with the lowest cost
   let best = null;
@@ -205,7 +243,16 @@ export function classify(samples, centreIds) {
     const own = d[assign[id]];
     margin[id] = centreIds.includes(id) ? Infinity : Math.min(...d.filter((_, k) => k !== assign[id])) - own;
   }
-  return { colors: Object.fromEntries(ids.map((id) => [id, best.keys[assign[id]]])), margin };
+  // the corrected colours and the cluster each name ended up on are worth
+  // handing back: what the light really was is half of what was measured here
+  const prototypes = {};
+  best.keys.forEach((key, k) => { prototypes[key] = means[k]; });
+  return {
+    colors: Object.fromEntries(ids.map((id) => [id, best.keys[assign[id]]])),
+    margin,
+    lab: Object.fromEntries(ids.map((id) => [id, lab[id]])),
+    prototypes,
+  };
 }
 
 // If the read cube is impossible, try swapping the colours of the most
