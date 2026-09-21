@@ -19,7 +19,7 @@ export const STEPS = [
   },
   {
     face: "R", name: "de la derecha",
-    how: "Gira el cubo un cuarto de vuelta, de forma que la cara que estaba a la derecha quede ahora de frente. Mantén arriba la misma cara de siempre.",
+    how: "Gira el cubo un cuarto de vuelta, de forma que la cara que estaba a la derecha quede ahora de frente. Si te equivocas de sentido no pasa nada: al final se deduce cómo lo sujetaste.",
   },
   {
     face: "B", name: "de detrás",

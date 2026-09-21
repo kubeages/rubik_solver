@@ -172,9 +172,13 @@ export const INFO = {
       </ul>
       <h4>El orden de las caras</h4>
       <ul>
-        <li>Primero las cuatro laterales, girando <b>siempre en el mismo sentido</b> y manteniendo
-        arriba la misma cara. Luego arriba y abajo, inclinando el cubo.</li>
-        <li>Ese orden es el que hace que cada cara caiga en su sitio del cubo sin preguntarte nada.</li>
+        <li>Primero las cuatro laterales, girando en el mismo sentido y manteniendo arriba la misma
+        cara. Luego arriba y abajo, inclinando el cubo.</li>
+        <li><b>Es una guía, no una obligación:</b> al terminar se prueba cómo encajan las seis caras
+        entre sí y se deduce cómo sujetaste el cubo, aunque lo giraras de otra manera o alguna cara
+        quedara torcida. Te dice lo que ha tenido que corregir.</li>
+        <li>Lo que sí importa es <b>no repetir una cara</b>, y de eso también avisa: si le enseñas
+        una que ya tiene, no la vuelve a registrar.</li>
       </ul>
       <h4>Si una cara no hay manera</h4>
       <p><b>Ajustar a mano</b> congela la imagen y colocas las 4 esquinas de la cara; los círculos
