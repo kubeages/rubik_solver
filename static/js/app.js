@@ -211,7 +211,8 @@ function ensureFaceScan() {
   }, {
     onDone: (faces) => {
       app.orientedFaces = 0;
-      app.rearranged = 0;
+      app.rearranged = null;
+      app.ambiguous = false;
       app.repairedStickers = 0;
       app.colors = facesToColors(faces);
       app.capture = null;
@@ -276,12 +277,18 @@ function turnFace(nine) {
 // Work out how the cube was actually held.
 //
 // The order of the steps assumes a particular way of turning the cube, and a
-// hand does not always oblige: a face ends up rotated, or turned the other
-// way round, and the cube is then impossible. Rather than demanding
-// precision, every way of assigning the six scanned faces to the six
-// positions, each with any of its four turns, is searched for one that makes
-// a cube that could exist. The centres never move, so the colours themselves
-// are never in question.
+// hand does not always oblige: a face ends up rotated, or the cube is turned
+// the other way round, and then the cube comes out impossible. So the faces
+// are tried turned every way, under a handful of ways of holding the cube.
+//
+// What is NOT tried is putting the faces in any order at all, tempting as it
+// was. Measured: with the six faces shuffled, exactly 24 arrangements make a
+// cube that could exist and only one of them is the cube in your hands. The
+// other 23 are legal cubes made of your stickers glued together differently,
+// and solving one of those would send the user turning faces for nothing.
+// Six loose faces simply do not say how they were joined; what says it is the
+// order they were shown in. So the order is trusted, and if nothing fits, the
+// colours are what is wrong, not the way the cube was held.
 //
 // The search is cut down as it goes: a corner of a cube always shows three
 // different colours, and so does no edge, so an assignment that breaks that
@@ -304,6 +311,17 @@ const EDGE_CHECKS = [
   [[23, 12], [2, 1]], [[21, 41], [2, 4]], [[50, 39], [5, 4]], [[48, 14], [5, 1]],
 ];
 
+// The ways of holding the cube that the six steps can be read as. Each one
+// says which scanned face goes in position U, R, F, D, L, B. They are real
+// ways of holding a cube, not arbitrary shuffles, so each gives back the cube
+// that is actually in the user's hands.
+const HOLDINGS = [
+  { how: null, order: [0, 1, 2, 3, 4, 5] },
+  { how: "girando el cubo al revés", order: [0, 4, 2, 3, 1, 5] },
+  { how: "enseñando abajo donde pedía arriba", order: [3, 1, 2, 0, 4, 5] },
+  { how: "girando al revés y con arriba y abajo cambiados", order: [3, 4, 2, 0, 1, 5] },
+];
+
 function orientFaces(read) {
   if (app.model.isValid(read)) return read;
   const scanned = POSITIONS.map((_, k) => read.slice(k * 9, k * 9 + 9));
@@ -313,54 +331,64 @@ function orientFaces(read) {
     return list;
   });
 
-  const placed = new Array(6).fill(null);     // position -> [face, turn]
-  const used = new Array(6).fill(false);
+  const placed = new Array(6).fill(null);     // position -> turn given to its face
+  const ready = new Array(6).fill(false);     // ...which is 0 for an unturned one
   const board = new Array(54).fill(null);
-  let answer = null;
+  let order = null;
 
   const fits = (position) => {
     for (const [facelets, faces] of CORNER_CHECKS) {
-      if (!faces.includes(position) || faces.some((f) => !placed[f])) continue;
+      if (!faces.includes(position) || faces.some((f) => !ready[f])) continue;
       const [a, b, c] = facelets.map((i) => board[i]);
       if (a === b || b === c || a === c) return false;
     }
     for (const [facelets, faces] of EDGE_CHECKS) {
-      if (!faces.includes(position) || faces.some((f) => !placed[f])) continue;
+      if (!faces.includes(position) || faces.some((f) => !ready[f])) continue;
       if (board[facelets[0]] === board[facelets[1]]) return false;
     }
     return true;
   };
 
+  // every turn of every face, in the order this way of holding the cube says
+  const found = [];
   const search = (position) => {
-    if (answer) return true;
     if (position === 6) {
       const candidate = board.slice();
-      if (!app.model.isValid(candidate)) return false;
-      answer = candidate;
-      return true;
-    }
-    for (let face = 0; face < 6; face++) {
-      if (used[face]) continue;
-      for (let turn = 0; turn < 4; turn++) {
-        const nine = turns[face][turn];
-        for (let i = 0; i < 9; i++) board[position * 9 + i] = nine[i];
-        placed[position] = [face, turn];
-        used[face] = true;
-        if (fits(position) && search(position + 1)) return true;
-        used[face] = false;
-        placed[position] = null;
+      if (app.model.isValid(candidate)) {
+        found.push({ colors: candidate, how, turned: placed.filter(Boolean).length, holding: rank });
       }
+      return;
     }
-    return false;
+    for (let turn = 0; turn < 4; turn++) {
+      const nine = turns[order[position]][turn];
+      for (let i = 0; i < 9; i++) board[position * 9 + i] = nine[i];
+      placed[position] = turn;
+      ready[position] = true;
+      if (fits(position)) search(position + 1);
+      ready[position] = false;
+      placed[position] = null;
+    }
   };
 
-  // the face scanned first stays where it was asked for, so the cube is
-  // described the way the user held it whenever that already works
-  search(0);
-  if (!answer) return read;                  // nothing fits: it is the colours
-  app.rearranged = POSITIONS.some((_, k) => placed[k] && placed[k][0] !== k) ? 1 : 0;
-  app.orientedFaces = placed.filter((p) => p && p[1]).length;
-  return answer;
+  let how = null, rank = 0;
+  HOLDINGS.forEach((holding, i) => {
+    order = holding.order;
+    how = holding.how;
+    rank = i;
+    search(0);
+  });
+  if (!found.length) return read;      // nothing fits: it is the colours that are wrong
+
+  // Take the reading that changes the least of what the user was asked to do.
+  // If two different cubes both fit, the faces genuinely do not say which one
+  // is on the table, so the user is told to look at the drawing.
+  found.sort((a, b) => a.holding - b.holding || a.turned - b.turned);
+  const answer = found[0];
+  const distinct = new Set(found.map((f) => f.colors.join(""))).size;
+  app.rearranged = answer.how;
+  app.orientedFaces = answer.turned;
+  app.ambiguous = distinct > 1;
+  return answer.colors;
 }
 
 function updateFacePreview(faces, step, current) {
@@ -527,8 +555,10 @@ async function runValidate() {
         if (app.orientedFaces) {
           parts.push(app.orientedFaces === 1 ? "una cara estaba girada" : `${app.orientedFaces} caras estaban giradas`);
         }
-        if (app.rearranged) parts.push("las caras no venían en el orden que te pedí");
-        st.textContent = `✓ Es un cubo válido. Lo he corregido solo: ${parts.join(" y ")}.`;
+        if (app.rearranged) parts.push(`parece que lo escaneaste ${app.rearranged}`);
+        st.textContent = `✓ Es un cubo válido. Lo he corregido solo: ${parts.join(" y ")}.` +
+          (app.ambiguous ? " Ojo: estas seis caras encajan de más de una manera, así que compruebá" +
+           "ndolo en el dibujo de abajo antes de seguir." : "");
         $("btn-solve").disabled = false;
         renderBasePicker();
         return;

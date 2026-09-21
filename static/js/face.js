@@ -154,6 +154,92 @@ function dominantDirection(steps, avoid) {
   return null;
 }
 
+// -- telling one face from another, whatever the light -------------------
+//
+// Comparing raw colours does not work. A white sticker read at 226 and, a
+// moment later with the cube tilted towards a lamp, at 180, is 80 units
+// apart: further than white is from yellow. So two readings of the same
+// face look like different faces, and the same face gets scanned twice.
+//
+// What a change of light does NOT change is the *share* of red, green and
+// blue in a colour (its chromaticity) and how bright a sticker is next to
+// the brightest one on the same face. That is what we compare.
+
+function stickerKey(rgb, maxLum) {
+  const sum = Math.max(1, rgb[0] + rgb[1] + rgb[2]);
+  const lum = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
+  return [rgb[0] / sum, rgb[1] / sum, lum / Math.max(1, maxLum)];
+}
+
+export function faceKeys(colors) {
+  if (!colors || colors.length !== 9 || colors.some((c) => !c)) return null;
+  const maxLum = Math.max(...colors.map((c) => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]));
+  return colors.map((c) => stickerKey(c, maxLum));
+}
+
+const KEY_WEIGHT = [2.6, 2.6, 0.45];   // the colour's share matters, its brightness barely
+function keyDistance(a, b) {
+  return Math.hypot(
+    KEY_WEIGHT[0] * (a[0] - b[0]),
+    KEY_WEIGHT[1] * (a[1] - b[1]),
+    KEY_WEIGHT[2] * (a[2] - b[2]));
+}
+
+const TURN = [6, 3, 0, 7, 4, 1, 8, 5, 2];   // the nine stickers after a quarter turn
+
+// How badly two faces disagree, under the turn that suits them best. Three
+// stickers are forgiven: a highlight or a shadow can spoil one or two of
+// them, and one bad sticker must not hide the fact that it is the same face.
+export function patternDistance(a, b) {
+  let order = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+  let best = Infinity;
+  for (let t = 0; t < 4; t++) {
+    const ds = a.map((k, i) => keyDistance(k, b[order[i]])).sort((p, q) => q - p);
+    best = Math.min(best, ds[3]);          // the fourth worst of the nine
+    order = TURN.map((j) => order[j]);
+    if (best === 0) break;
+  }
+  return best;
+}
+
+// The centre alone, with both faces first put under the same light: each
+// reading is divided by its own average colour (the grey-world assumption).
+function balancedCentre(colors) {
+  const mean = [0, 1, 2].map((k) => colors.reduce((s, c) => s + c[k], 0) / colors.length);
+  return [0, 1, 2].map((k) => colors[4][k] / Math.max(1, mean[k]));
+}
+
+export function centreDistance(a, b) {
+  const p = balancedCentre(a), q = balancedCentre(b);
+  return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+}
+
+// Chosen by measurement: over 7500 simulated scans with the light swinging
+// from 0.6x to 1.3x and a warm/cold tint, no repeated face got through, and
+// 2% of genuinely new faces were rejected (which the button undoes).
+const SAME_PATTERN = 0.35;
+const SAME_CENTRE = 0.14;
+
+// Is this face one of the faces already scanned?  Returns the matching entry
+// of `stored` ({ key, colors, ... }) or null. A cube has six faces of six
+// different colours, so a face that matches one already stored is that one
+// being shown again: it must not be recorded twice, or the cube comes out
+// impossible at the end.
+export function matchStored(colors, stored) {
+  const keys = faceKeys(colors);
+  if (!keys) return null;
+  let best = null;
+  for (const entry of stored) {
+    const other = faceKeys(entry.colors);
+    if (!other) continue;
+    const pattern = patternDistance(keys, other);
+    const centre = centreDistance(colors, entry.colors);
+    const score = Math.min(pattern / SAME_PATTERN, centre / SAME_CENTRE);
+    if (score < 1 && (!best || score < best.score)) best = { ...entry, score, pattern, centre };
+  }
+  return best;
+}
+
 function medianAt(data, w, h, x, y, r) {
   const x0 = Math.max(0, Math.round(x - r)), y0 = Math.max(0, Math.round(y - r));
   const x1 = Math.min(w - 1, Math.round(x + r)), y1 = Math.min(h - 1, Math.round(y + r));

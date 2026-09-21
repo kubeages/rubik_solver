@@ -5,7 +5,7 @@
 // corner, which is why this exists: the stickers are big, there is no
 // perspective to undo and no ambiguity about which face is which.
 
-import { FaceReader } from "./face.js";
+import { FaceReader, matchStored } from "./face.js";
 
 const NS = "http://www.w3.org/2000/svg";
 
@@ -58,7 +58,7 @@ export class FaceScan {
     this.corners = null;        // manual quad, when placing by hand
     this.dragging = null;
 
-    els.shoot.addEventListener("click", () => this.acceptCurrent());
+    els.shoot.addEventListener("click", () => this.acceptCurrent(!!this._repeat));
     els.cancel.addEventListener("click", () => { this.stop(); this.onCancel(); });
     if (els.manual) els.manual.addEventListener("click", () => this.handOver(true));
     if (els.retake) els.retake.addEventListener("click", () => this.retakeFace());
@@ -74,6 +74,7 @@ export class FaceScan {
   async begin() {
     this.faces = {};
     this.step = 0;
+    this._repeat = this._repeatMsg = null;
     this.reader.reset();
     this.manual = false;
     await this.startCamera();
@@ -166,43 +167,22 @@ export class FaceScan {
   }
 
   // -- the face is read: store it and move on ---------------------------
-  acceptCurrent() {
+  // `forced` comes from the user pressing the button after we told them the
+  // face was already scanned: they have the cube in their hands, so if they
+  // insist that it is a different face, they win.
+  acceptCurrent(forced = false) {
     const colors = this.reader.colors();
     if (colors.some((c) => !c)) {
       this.els.hint.textContent = "Aún faltan pegatinas por leer en esta cara.";
       return false;
     }
-    // A cube has six different centres, so a face whose centre matches one
-    // already stored is a face already scanned: the cube has not been turned,
-    // or has been turned back to one that is done. Either way it must not be
-    // recorded twice, which was making the cube come out impossible.
-    const already = this._alreadyScanned(colors);
+    const already = forced ? null : matchStored(colors, this._stored());
     if (already) {
-      this.reader.reset();
-      this._settledFrames = 0;
-      this._startedAt = Date.now();
-      if (this.els.quality) {
-        this.els.quality.className = "quality near";
-        this.els.quality.innerHTML =
-          `<span class="quality-bar"><i style="width:100%"></i></span>` +
-          `<span class="quality-msg">Esa cara ya la tienes (la ${already}) · enséñame una que falte</span>`;
-      }
-      return false;
-    }
-    const previous = this.step > 0 ? this.faces[STEPS[this.step - 1].face] : null;
-    if (previous && sameFace(previous, colors)) {
-      this.reader.reset();
-      this._settledFrames = 0;
-      this._startedAt = Date.now();     // the wait does not count against them
-      if (this.els.quality) {
-        this.els.quality.className = "quality near";
-        this.els.quality.innerHTML =
-          `<span class="quality-bar"><i style="width:100%"></i></span>` +
-          `<span class="quality-msg">Esa es la cara anterior · gira el cubo a la siguiente</span>`;
-      }
+      this._flagRepeat(already);
       return false;            // keep reading: the loop must not stop here
     }
     this._stopLoop();
+    this._repeat = this._repeatMsg = null;
     this._flash();
     this.faces[STEPS[this.step].face] = colors;
     this.onFrame({ step: this.step, faces: this.faces, current: [] });
@@ -223,17 +203,28 @@ export class FaceScan {
     return true;
   }
 
-  // Which stored face this one is, if any: centres are one per colour.
-  _alreadyScanned(colors) {
-    const centre = colors[4];
-    if (!centre) return null;
-    for (const step of STEPS.slice(0, this.step)) {
-      const stored = this.faces[step.face];
-      if (!stored || !stored[4]) continue;
-      const d = Math.hypot(centre[0] - stored[4][0], centre[1] - stored[4][1], centre[2] - stored[4][2]);
-      if (d < 50) return step.name.replace(/^de la |^de /, "");
-    }
-    return null;
+  // The faces already scanned, each with the name we called it by.
+  _stored() {
+    return STEPS
+      .filter((s) => this.faces[s.face])
+      .map((s) => ({ face: s.face, name: s.name.replace(/^de la |^de /, ""), colors: this.faces[s.face] }));
+  }
+
+  // This face is one we already have. Say so, keep reading, and offer the
+  // button as a way out in case we are the ones getting it wrong.
+  _flagRepeat(match) {
+    this._repeat = match;
+    this.reader.reset();
+    this._settledFrames = 0;
+    this._startedAt = Date.now();        // the wait does not count against them
+    const left = STEPS.filter((s) => !this.faces[s.face]).length;
+    // kept until a different face is read, so the warning does not flash past
+    this._repeatMsg = `Esa cara ya la tienes (la ${match.name}) · gira el cubo` +
+      (left > 1 ? `, te faltan ${left}` : "");
+    this._showProgress({ read: 0, message: this._repeatMsg });
+    if (this.els.shoot) this.els.shoot.textContent = "No, es otra cara: úsala";
+    this.els.hint.textContent =
+      "Si de verdad es otra cara y me estoy equivocando, pulsa «No, es otra cara: úsala».";
   }
 
   // A moment to turn the cube before the next face starts being read, or the
@@ -253,6 +244,7 @@ export class FaceScan {
   retakeFace() {
     // start this face again from scratch, keeping the ones already stored
     delete this.faces[STEPS[this.step].face];
+    this._repeat = this._repeatMsg = null;
     this.reader.reset();
     this.manual = false;
     this.corners = null;
@@ -294,6 +286,7 @@ export class FaceScan {
         [w / 2 + s, h / 2 + s], [w / 2 - s, h / 2 + s],
       ];
     }
+    this._manualForced = false;
     this._showButtons("manual");
     this.els.hint.textContent = onRequest
       ? "Arrastra las 4 esquinas hasta las esquinas de la cara. Los círculos muestran el color que lee cada pegatina."
@@ -326,6 +319,19 @@ export class FaceScan {
     if (!this.manualCells) return;
     const colors = [];
     for (const row of this.manualCells) for (const cell of row) colors.push(cell.rgb);
+    // the same check as with the camera: a face placed by hand can just as
+    // easily be one that is already scanned
+    const already = this._manualForced ? null : matchStored(colors, this._stored());
+    if (already) {
+      this._manualForced = true;
+      this.els.hint.textContent =
+        `Esa parece la cara ${already.name}, que ya tienes. Gira el cubo a una que falte, ` +
+        `o vuelve a pulsar «Usar esta cara» si de verdad es otra.`;
+      if (this.els.use) this.els.use.textContent = "Es otra cara: úsala ›";
+      return;
+    }
+    this._manualForced = false;
+    this._repeat = this._repeatMsg = null;
     this.faces[STEPS[this.step].face] = colors;
     this._flash();
     this.step += 1;
@@ -388,15 +394,18 @@ export class FaceScan {
     if (!box) return;
     box.hidden = false;
     const read = res.read || 0;
-    box.className = `quality ${read === 9 ? "ok" : read >= 5 ? "near" : "bad"}`;
     const waiting = Date.now() - this._startedAt;
     const left = Math.max(0, Math.ceil((PATIENCE_MS - waiting) / 1000));
     let tail = "";
     if (read < 9 && waiting > 4000 && read >= 6) tail = " · mueve un poco el cubo para quitar reflejos";
     if (read < 9 && left < 8) tail = ` (en ${left} s lo ajustamos a mano)`;
+    // While the face in front of the camera is one we already have, that is
+    // the only thing worth saying: the reading underneath is going nowhere.
+    const repeated = !!this._repeatMsg;
+    box.className = `quality ${repeated ? "near" : read === 9 ? "ok" : read >= 5 ? "near" : "bad"}`;
     box.innerHTML =
       `<span class="quality-bar"><i style="width:${Math.round((read / 9) * 100)}%"></i></span>` +
-      `<span class="quality-msg">${res.message}${tail}</span>`;
+      `<span class="quality-msg">${repeated ? `${this._repeatMsg} · leyendo ${read} de 9` : res.message + tail}</span>`;
   }
 
   _updateTexts() {
@@ -472,17 +481,6 @@ export class FaceScan {
     this.corners[this.dragging] = [p.x, p.y];
     this._sampleManual();
   }
-}
-
-// Two readings of nine stickers that agree everywhere are the same face.
-function sameFace(a, b) {
-  if (!a || !b) return false;
-  let worst = 0;
-  for (let i = 0; i < 9; i++) {
-    if (!a[i] || !b[i]) return false;
-    worst = Math.max(worst, Math.hypot(a[i][0] - b[i][0], a[i][1] - b[i][1], a[i][2] - b[i][2]));
-  }
-  return worst < 30;
 }
 
 function medianPatch(ctx, x, y, r, w, h) {

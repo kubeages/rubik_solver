@@ -174,11 +174,19 @@ export const INFO = {
       <ul>
         <li>Primero las cuatro laterales, girando en el mismo sentido y manteniendo arriba la misma
         cara. Luego arriba y abajo, inclinando el cubo.</li>
-        <li><b>Es una guía, no una obligación:</b> al terminar se prueba cómo encajan las seis caras
-        entre sí y se deduce cómo sujetaste el cubo, aunque lo giraras de otra manera o alguna cara
-        quedara torcida. Te dice lo que ha tenido que corregir.</li>
-        <li>Lo que sí importa es <b>no repetir una cara</b>, y de eso también avisa: si le enseñas
-        una que ya tiene, no la vuelve a registrar.</li>
+        <li><b>Hay margen:</b> si alguna cara te sale torcida, o giraste el cubo al revés, o
+        enseñaste abajo donde pedía arriba, lo deduce al terminar y te dice qué ha supuesto.</li>
+        <li>Lo que no puede hacer es adivinar un orden cualquiera, y merece la pena saber por qué:
+        seis caras sueltas <b>no dicen cómo estaban pegadas</b>. Con las caras barajadas hay
+        <b>24 cubos legales</b> distintos hechos con tus mismas pegatinas y solo uno es el tuyo;
+        elegir uno sería jugártela a 1 entre 24 y mandarte a girar caras para nada. Lo que sí lo
+        dice es <b>el orden en que las enseñas</b>, y por eso el orden se respeta.</li>
+        <li>Lo que sí importa es <b>no repetir una cara</b>, y de eso se encarga sola: si le enseñas
+        una que ya tiene, te lo dice y no la vuelve a registrar. Para reconocerla no compara los
+        colores tal cual (con otra luz el mismo blanco cambia más de lo que se parecen el blanco y
+        el amarillo), sino <b>qué proporción de rojo, verde y azul</b> tiene cada pegatina, que no
+        cambia al subir o bajar la luz, y prueba los cuatro giros de la cara por si la enseñas
+        torcida. Si aun así se equivoca, tienes el botón <b>«No, es otra cara: úsala»</b>.</li>
       </ul>
       <h4>Si una cara no hay manera</h4>
       <p><b>Ajustar a mano</b> congela la imagen y colocas las 4 esquinas de la cara; los círculos
@@ -316,11 +324,11 @@ export function techLines(key, ctx) {
       ];
     case "capture":
       return [
-        ["Detección", "segmentación de manchas de color uniforme + ajuste de la rejilla del cubo"],
-        ["Cámara", "ortográfica con escala (8 números), ajustada por iteraciones de emparejar y resolver"],
-        ["Desambiguación", "líneas negras entre pegatinas y huella de las manchas: una rejilla corrida una casilla también encaja"],
-        ["Resolución", "480 px de ancho para analizar; ~13 ms por fotograma en seguimiento"],
-        ["Lectura", "cada pegatina se fija cuando 3 lecturas coinciden; si una se contradice 3 veces, se suelta y se vuelve a leer"],
+        ["Detección", "se segmentan los huecos del marco negro (y, como alternativa, las manchas de color) a tres escalas"],
+        ["Rejilla", "las direcciones de la cuadrícula salen de los propios parches: histograma de ángulos entre vecinos, y cada parche se proyecta a su fila y columna"],
+        ["Resolución", "480 px de ancho para analizar; se prueban 6 segmentaciones por fotograma"],
+        ["Lectura", "cada pegatina se fija cuando 3 lecturas coinciden; si una se resiste 7 s, se lee del punto donde la rejilla dice que está"],
+        ["Caras repetidas", "se comparan cromaticidad r/(r+g+b) y brillo relativo, bajo los 4 giros, perdonando las 3 peores pegatinas: así una cara sigue siendo la misma aunque cambie la luz"],
       ];
     case "review":
       return [
@@ -328,6 +336,7 @@ export function techLines(key, ctx) {
         ["Orientaciones", "suma de giros de esquinas ≡ 0 (mod 3) y de volteos de aristas ≡ 0 (mod 2)"],
         ["Paridad", "la permutación de esquinas y la de aristas deben tener la misma paridad"],
         ["Segunda foto", "se prueban las 3 orientaciones posibles y se elige la que da un cubo posible"],
+        ["Cómo lo sujetaste", "4 formas de sujetarlo × 4 giros por cara (4.096 combinaciones), podadas por esquinas y aristas; si encajan dos, se avisa"],
         ["Reparación", "si el cubo es imposible, se intercambian las pegatinas más dudosas hasta que deje de serlo"],
       ];
     case "mode":
