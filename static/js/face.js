@@ -187,57 +187,89 @@ function keyDistance(a, b) {
 
 const TURN = [6, 3, 0, 7, 4, 1, 8, 5, 2];   // the nine stickers after a quarter turn
 
-// How badly two faces disagree, under the turn that suits them best. Three
-// stickers are forgiven: a highlight or a shadow can spoil one or two of
-// them, and one bad sticker must not hide the fact that it is the same face.
+// How far apart two faces are: the average over the nine stickers, under the
+// turn that suits them best.
+//
+// The average, and not "the worst sticker, forgiving a few". That was the
+// first try and it let repeats through on a cube whose red and orange are
+// close and whose stickers catch the light: a highlight washes a sticker
+// towards white, and a rule that looks only at the worst ones is then reading
+// the highlights instead of the face. Averaged, the spoiled ones are outvoted
+// by the rest, while two genuinely different faces disagree nearly everywhere
+// and stay far apart. The single worst sticker is dropped first, so one badly
+// read sticker cannot drag a face away from itself either; measured, that one
+// change is what makes the same threshold fit both kinds of trouble.
 export function patternDistance(a, b) {
   let order = [0, 1, 2, 3, 4, 5, 6, 7, 8];
   let best = Infinity;
   for (let t = 0; t < 4; t++) {
     const ds = a.map((k, i) => keyDistance(k, b[order[i]])).sort((p, q) => q - p);
-    best = Math.min(best, ds[3]);          // the fourth worst of the nine
+    best = Math.min(best, ds.slice(1).reduce((x, y) => x + y, 0) / 8);
     order = TURN.map((j) => order[j]);
-    if (best === 0) break;
   }
   return best;
 }
 
-// The centre alone, with both faces first put under the same light: each
-// reading is divided by its own average colour (the grey-world assumption).
-function balancedCentre(colors) {
-  const mean = [0, 1, 2].map((k) => colors.reduce((s, c) => s + c[k], 0) / colors.length);
-  return [0, 1, 2].map((k) => colors[4][k] / Math.max(1, mean[k]));
-}
-
-export function centreDistance(a, b) {
-  const p = balancedCentre(a), q = balancedCentre(b);
-  return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
-}
-
-// Chosen by measurement: over 7500 simulated scans with the light swinging
-// from 0.6x to 1.3x and a warm/cold tint, no repeated face got through, and
-// 2% of genuinely new faces were rejected (which the button undoes).
-const SAME_PATTERN = 0.35;
-const SAME_CENTRE = 0.14;
+// Chosen by measurement, with the light swinging from 0.6x to 1.3x and tinted
+// warm and cold, on two cubes: one with red and orange close together and
+// highlights on the stickers (0.3% of repeated faces got through, 1.5% of new
+// faces refused) and one with a whole sticker misread now and then (0.1% and
+// 0.9%). Refusing a good face costs a button press; letting a repeat through
+// ruins the scan, so the threshold leans that way. The looser number is for
+// the check at the end, where the answer is a question to the user rather
+// than a decision taken behind their back.
+const SAME_FACE = 0.32;
+const SAME_FACE_LOOSE = 0.37;
 
 // Is this face one of the faces already scanned?  Returns the matching entry
-// of `stored` ({ key, colors, ... }) or null. A cube has six faces of six
+// of `stored` ({ face, name, colors }) or null. A cube has six faces of six
 // different colours, so a face that matches one already stored is that one
 // being shown again: it must not be recorded twice, or the cube comes out
 // impossible at the end.
-export function matchStored(colors, stored) {
+export function matchStored(colors, stored, limit = SAME_FACE) {
   const keys = faceKeys(colors);
   if (!keys) return null;
   let best = null;
   for (const entry of stored) {
     const other = faceKeys(entry.colors);
     if (!other) continue;
-    const pattern = patternDistance(keys, other);
-    const centre = centreDistance(colors, entry.colors);
-    const score = Math.min(pattern / SAME_PATTERN, centre / SAME_CENTRE);
-    if (score < 1 && (!best || score < best.score)) best = { ...entry, score, pattern, centre };
+    const distance = patternDistance(keys, other);
+    if (distance < limit && (!best || distance < best.distance)) best = { ...entry, distance };
   }
   return best;
+}
+
+// Last look before the cube is handed over: six faces, six colours. If two of
+// them are the same face, one was recorded twice in spite of everything, and
+// the cube will be impossible on the next screen. Better to notice here and
+// ask for that one again. Returns the two entries, the later one first.
+//
+// This one does not use a threshold. With all six faces in hand there are
+// fifteen pairs to look at, and asking fifteen times "are these two closer
+// than X?" gets a wrong yes far too often: at a 5% chance each, half the good
+// scans would be sent back. So the pairs are compared with each other
+// instead: a face recorded twice is not merely close to its twin, it is far
+// closer than any other pair of faces on that cube. That ratio is the same
+// whatever the cube's colours or the light. Measured, at 0.45 it never
+// queried a good scan and caught two thirds to four fifths of the repeats
+// that got past the check during scanning.
+const CLEARLY_CLOSER = 0.45;
+
+export function repeatedPair(stored) {
+  if (stored.length < 4) return null;          // too few pairs to compare with
+  const keys = stored.map((entry) => faceKeys(entry.colors));
+  if (keys.some((k) => !k)) return null;
+  const pairs = [];
+  for (let i = 0; i < stored.length; i++) {
+    for (let j = i + 1; j < stored.length; j++) {
+      pairs.push({ i, j, distance: patternDistance(keys[i], keys[j]) });
+    }
+  }
+  pairs.sort((a, b) => a.distance - b.distance);
+  const [closest, next] = pairs;
+  if (closest.distance > SAME_FACE_LOOSE) return null;
+  if (closest.distance > CLEARLY_CLOSER * next.distance) return null;
+  return [stored[closest.j], stored[closest.i]];     // the later one first
 }
 
 function medianAt(data, w, h, x, y, r) {

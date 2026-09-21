@@ -5,7 +5,7 @@
 // corner, which is why this exists: the stickers are big, there is no
 // perspective to undo and no ambiguity about which face is which.
 
-import { FaceReader, matchStored } from "./face.js";
+import { FaceReader, matchStored, repeatedPair } from "./face.js";
 
 const NS = "http://www.w3.org/2000/svg";
 
@@ -75,6 +75,7 @@ export class FaceScan {
     this.faces = {};
     this.step = 0;
     this._repeat = this._repeatMsg = null;
+    this._insisted = new Set();   // faces the user has already had the last word on
     this.reader.reset();
     this.manual = false;
     await this.startCamera();
@@ -176,6 +177,7 @@ export class FaceScan {
       this.els.hint.textContent = "Aún faltan pegatinas por leer en esta cara.";
       return false;
     }
+    if (forced) this._insisted.add(STEPS[this.step].face);
     const already = forced ? null : matchStored(colors, this._stored());
     if (already) {
       this._flagRepeat(already);
@@ -188,11 +190,7 @@ export class FaceScan {
     this.onFrame({ step: this.step, faces: this.faces, current: [] });
     this.step += 1;
     this.reader.reset();
-    if (this.step >= STEPS.length) {
-      this.stop();
-      this.onDone(this.faces);
-      return true;
-    }
+    if (this.step >= STEPS.length) return this._finish();
     this.manual = false;
     this.corners = null;
     this._showButtons("camera");
@@ -200,6 +198,40 @@ export class FaceScan {
     this.els.video.style.display = "block";
     this._updateTexts();
     this._pauseThenRead();
+    return true;
+  }
+
+  // Six faces read: one last look before handing the cube over. Two faces
+  // that are the same face mean one got in twice despite the checks, and the
+  // cube would be impossible on the next screen; asking for that one again
+  // here costs a few seconds instead of the whole scan.
+  _finish() {
+    const twins = repeatedPair(this._stored());
+    // ...but only once per face. If the user was asked and insisted, or has
+    // already scanned that face again, they have the last word: asking twice
+    // would be a loop with no way out.
+    if (twins && !this._insisted.has(twins[0].face)) {
+      const [late, first] = twins;
+      this._insisted.add(late.face);
+      delete this.faces[late.face];
+      this.step = STEPS.findIndex((s) => s.face === late.face);
+      this.reader.reset();
+      this._repeat = this._repeatMsg = null;
+      this.manual = false;
+      this.corners = null;
+      this._showButtons("camera");
+      this.els.canvas.style.display = "none";
+      this.els.video.style.display = "block";
+      this._updateTexts();
+      this.els.hint.textContent =
+        `Esta cara y la ${first.name} me han salido iguales, así que una de las dos está mal. ` +
+        `Enséñame otra vez la ${late.name}; si insistes, el botón la da por buena igualmente.`;
+      this.onFrame({ step: this.step, faces: this.faces, current: [] });
+      this._pauseThenRead();
+      return true;      // true means "stop the frame loop", not "all done"
+    }
+    this.stop();
+    this.onDone(this.faces);
     return true;
   }
 
@@ -321,6 +353,7 @@ export class FaceScan {
     for (const row of this.manualCells) for (const cell of row) colors.push(cell.rgb);
     // the same check as with the camera: a face placed by hand can just as
     // easily be one that is already scanned
+    if (this._manualForced) this._insisted.add(STEPS[this.step].face);
     const already = this._manualForced ? null : matchStored(colors, this._stored());
     if (already) {
       this._manualForced = true;
@@ -338,11 +371,7 @@ export class FaceScan {
     this.reader.reset();
     this.manual = false;
     this.corners = null;
-    if (this.step >= STEPS.length) {
-      this.stop();
-      this.onDone(this.faces);
-      return;
-    }
+    if (this.step >= STEPS.length) { this._finish(); return; }
     this._showButtons("camera");
     this.els.canvas.style.display = "none";
     this.els.video.style.display = "block";

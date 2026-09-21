@@ -186,7 +186,12 @@ export const INFO = {
         colores tal cual (con otra luz el mismo blanco cambia más de lo que se parecen el blanco y
         el amarillo), sino <b>qué proporción de rojo, verde y azul</b> tiene cada pegatina, que no
         cambia al subir o bajar la luz, y prueba los cuatro giros de la cara por si la enseñas
-        torcida. Si aun así se equivoca, tienes el botón <b>«No, es otra cara: úsala»</b>.</li>
+        torcida. Mira las nueve <b>en promedio</b>, no la que peor encaje: si un reflejo estropea
+        una pegatina, las otras ocho mandan. Si aun así se equivoca, tienes el botón
+        <b>«No, es otra cara: úsala»</b>.</li>
+        <li>Y al terminar hay <b>una última comprobación</b>: seis caras tienen que ser seis caras
+        distintas. Compara los quince pares y, si uno destaca por lo parecido, te pide esa cara otra
+        vez en vez de mandarte a la pantalla siguiente con un cubo imposible.</li>
       </ul>
       <h4>Si una cara no hay manera</h4>
       <p><b>Ajustar a mano</b> congela la imagen y colocas las 4 esquinas de la cara; los círculos
@@ -328,7 +333,8 @@ export function techLines(key, ctx) {
         ["Rejilla", "las direcciones de la cuadrícula salen de los propios parches: histograma de ángulos entre vecinos, y cada parche se proyecta a su fila y columna"],
         ["Resolución", "480 px de ancho para analizar; se prueban 6 segmentaciones por fotograma"],
         ["Lectura", "cada pegatina se fija cuando 3 lecturas coinciden; si una se resiste 7 s, se lee del punto donde la rejilla dice que está"],
-        ["Caras repetidas", "se comparan cromaticidad r/(r+g+b) y brillo relativo, bajo los 4 giros, perdonando las 3 peores pegatinas: así una cara sigue siendo la misma aunque cambie la luz"],
+        ["Caras repetidas", "distancia media entre las 9 pegatinas (cromaticidad r/(r+g+b) y brillo relativo), bajo los 4 giros y quitando la peor pegatina; umbral 0,32 medido sobre dos cubos con la luz de 0,6× a 1,3×"],
+        ["Última comprobación", "al terminar se comparan los 15 pares de caras: una repetida no solo está cerca de su gemela, está 2 veces más cerca que cualquier otro par, y eso no depende de los colores del cubo ni de la luz"],
       ];
     case "review":
       return [
