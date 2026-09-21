@@ -210,7 +210,7 @@ function ensureFaceScan() {
     autoToggle: $("auto-toggle"), diag: $("btn-diag"), manual: $("btn-manual"),
     onStep: (step, faces) => updateFacePreview(faces, step),
   }, {
-    onDone: (faces) => {
+    onDone: (faces, doubtful) => {
       app.orientedFaces = 0;
       app.rearranged = null;
       app.ambiguous = false;
@@ -218,7 +218,7 @@ function ensureFaceScan() {
       app.repairedStickers = 0;
       app.doubtful = new Set();
       app.capture = null;
-      app.colors = facesToColors(faces);   // this also marks the stickers to check
+      app.colors = facesToColors(faces, doubtful);   // this also marks the stickers to check
       openReview();
     },
     onCancel: () => show(app.plan ? "solve" : "home"),
@@ -230,10 +230,11 @@ function ensureFaceScan() {
 // because the order the steps ask for keeps the same face up throughout.
 // What the camera read are raw colours, so they still have to be sorted into
 // the six of the cube, anchored on the centres and nine of each.
-function facesToColors(faces) {
+function facesToColors(faces, doubtful = {}) {
   const samples = {};
   const centreIds = [];
   const lights = {};        // each face was read on its own, under its own light
+  const unsure = new Set(); // stickers the camera could not read cleanly
   "URFDLB".split("").forEach((f, k) => {
     const nine = faces[f];
     for (let i = 0; i < 9; i++) {
@@ -241,11 +242,15 @@ function facesToColors(faces) {
       samples[id] = nine && nine[i] ? nine[i] : [128, 128, 128];
       lights[id] = k;
       if (i === 4) centreIds.push(id);
+      if ((doubtful[f] || []).includes(i)) unsure.add(k * 9 + i);
     }
   });
-  const { colors, margin, lab, prototypes } = classify(samples, centreIds, lights);
+  app.rawSamples = samples;          // kept for the bug report button
+  app.rawUnsure = [...unsure];
+  const { colors, margin, lab, prototypes } =
+    classify(samples, centreIds, lights, new Set([...unsure].map(String)));
   const centreKeys = centreIds.map((id) => colors[id]);
-  const read = readPieces(lab, prototypes, centreKeys, app.model, app.meta);
+  const read = readPieces(lab, prototypes, centreKeys, app.model, app.meta, { unsure });
   // Where reading by pieces disagrees with reading each sticker on its own,
   // the structure of the cube has overruled the camera. It is usually right,
   // but it is exactly where a mistake would hide, so those stickers are
@@ -258,19 +263,19 @@ function facesToColors(faces) {
     // stayed where they were read
     const moved = oriented.some((c, i) => c !== read[i]);
     app.overruled = moved ? [] : overruled;
-    app.doubtful = new Set(app.overruled);
+    app.doubtful = new Set([...app.overruled, ...(moved ? [] : unsure)]);
     return oriented;
   }
   // No way of holding the cube explains these colours, so one of them is
   // wrong. Red against orange, white against yellow under a warm light: the
   // doubtful ones are swapped in pairs until the cube makes sense.
-  const doubtful = Object.keys(margin)
+  const shaky = Object.keys(margin)
     .sort((a, b) => margin[a] - margin[b])
     .slice(0, 10)
     .map(Number);
-  for (let i = 0; i < doubtful.length; i++) {
-    for (let j = i + 1; j < doubtful.length; j++) {
-      const a = doubtful[i], b = doubtful[j];
+  for (let i = 0; i < shaky.length; i++) {
+    for (let j = i + 1; j < shaky.length; j++) {
+      const a = shaky[i], b = shaky[j];
       if (read[a] === read[b]) continue;
       const candidate = read.slice();
       candidate[a] = read[b];
@@ -978,6 +983,33 @@ async function boot() {
   });
   window.addEventListener("scroll", repositionTip, { passive: true });
   window.addEventListener("resize", repositionTip);
+
+  // A way to send back exactly what the camera saw. Everything here has been
+  // tuned against cubes I made up, which is why it keeps being wrong about
+  // real ones: these numbers are the only thing that fixes that.
+  if ($("btn-report")) {
+    $("btn-report").addEventListener("click", async () => {
+      const report = {
+        cuando: new Date().toISOString(),
+        leidoCrudo: app.rawSamples
+          ? Array.from({ length: 54 }, (_, i) => (app.rawSamples[String(i)] || []).map(Math.round))
+          : null,
+        inseguras: app.rawUnsure || [],
+        colores: app.colors ? app.colors.join("") : null,
+        corregidas: app.overruled || [],
+        caraGirada: app.rearranged || null,
+      };
+      const text = JSON.stringify(report);
+      try {
+        await navigator.clipboard.writeText(text);
+        $("btn-report").textContent = "Copiado · pégalo en el mensaje";
+      } catch (err) {
+        await modal(`<h3>Lectura del cubo</h3><p>Copia este texto y pégamelo:</p>` +
+          `<textarea readonly style="width:100%;height:9em;font-family:monospace;font-size:.72rem">${text}</textarea>`);
+      }
+      setTimeout(() => { $("btn-report").textContent = "Copiar lectura para informar de un fallo"; }, 4000);
+    });
+  }
 
   document.querySelectorAll("[data-action]").forEach((b) => b.addEventListener("click", async () => {
     const a = b.dataset.action;

@@ -143,6 +143,11 @@ function samplePatch(ctx, x, y, r, w, h) {
   return [med(rs), med(gs), med(bs)];
 }
 
+function hexToRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
 // samples: {id: rgb}; centreIds: six ids that are centres -> {id: colourKey}
 //
 // `groups` says which stickers were read under the same light: {id: group}.
@@ -157,8 +162,39 @@ function samplePatch(ctx, x, y, r, w, h) {
 // classify with the lights as they stand, then give each reading the gain
 // that best carries its own stickers onto the colours they were assigned,
 // then classify again. A few rounds and the six readings sit under one light.
-export function classify(samples, centreIds, groups = null) {
+export function classify(samples, centreIds, groups = null, unsure = new Set()) {
   const ids = Object.keys(samples);
+  // A centre the camera could not read is not lost. The six centres are the
+  // six colours, one each and fixed for ever, so the one that cannot be read
+  // is whichever is left over once the other five are named. Without this, a
+  // reflection or a glimpse of the black frame in the middle of a face
+  // renamed the whole face, and a solved red one came back as a mixture.
+  if (centreIds.some((id) => unsure.has(id))) {
+    const centreLab = centreIds.map((id) => srgbToLab(samples[id]));
+    let bestNames = null;
+    const search = (names, used, cost) => {
+      const k = names.length;
+      if (bestNames && cost >= bestNames.cost) return;
+      if (k === 6) { bestNames = { cost, names: names.slice() }; return; }
+      for (let c = 0; c < COLOR_KEYS.length; c++) {
+        if (used[c]) continue;
+        used[c] = true;
+        names.push(COLOR_KEYS[c]);
+        // an unreadable centre costs the same whatever we call it, so it ends
+        // up with the colour the others did not take
+        search(names, used,
+          cost + (unsure.has(centreIds[k]) ? 0 : labDist(centreLab[k], COLORS[COLOR_KEYS[c]].lab)));
+        names.pop();
+        used[c] = false;
+      }
+    };
+    search([], new Array(6).fill(false), 0);
+    samples = { ...samples };
+    centreIds.forEach((id, k) => {
+      if (!unsure.has(id)) return;
+      samples[id] = hexToRgb(COLORS[bestNames.names[k]].hex);
+    });
+  }
   const groupOf = (id) => (groups ? String(groups[id]) : "one");
   const groupIds = [...new Set(ids.map(groupOf))];
   const gain = Object.fromEntries(groupIds.map((g) => [g, [1, 1, 1]]));
@@ -216,8 +252,18 @@ export function classify(samples, centreIds, groups = null) {
       const mine = ids.filter((id) => groupOf(id) === g);
       const step = [0, 1, 2].map((c) =>
         median(mine.map((id) => (clusterRgb[assign[id]][c] + 6) / (lit(id)[c] + 6))));
+      // A face of a single colour says nothing about the light it was read
+      // under: any gain that turns its nine stickers into some colour fits
+      // equally well, and a gain that turns a red face orange then confirms
+      // itself round after round. That is how a whole solved face came back
+      // as a mixture. So the more colours a face shows, the more its own
+      // stickers are believed; with few, the light is taken from its centre
+      // alone, which is one colour we are sure of, because the centres are
+      // the six colours and cannot move.
+      const trust = Math.min(1, Math.max(0, (new Set(mine.map((id) => assign[id])).size - 2) / 2));
       // one step at a time, and never far: a wild gain would invent colours
-      gain[g] = gain[g].map((v, c) => Math.max(0.55, Math.min(1.8, v * Math.pow(step[c], 0.7))));
+      gain[g] = gain[g].map((v, c) => Math.max(0.55, Math.min(1.8,
+        v * Math.pow(step[c], 0.7 * trust))));
     }
     lab = Object.fromEntries(ids.map((id) => [id, srgbToLab(lit(id))]));
   }

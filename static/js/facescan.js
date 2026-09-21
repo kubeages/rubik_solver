@@ -42,6 +42,7 @@ export const STEPS = [
 const HOLD_FRAMES = 2;      // frames with the nine settled before moving on
 const TURN_PAUSE_MS = 2200; // time to turn the cube before reading the next face
 const RESCUE_MS = 7000;     // one sticker stuck: read it off the grid
+const LAST_RESORT_MS = 12000;   // a bad reflection: take what the grid gives
 const PATIENCE_MS = 18000;  // after this, offer to place the grid by hand
 
 export class FaceScan {
@@ -73,6 +74,7 @@ export class FaceScan {
 
   async begin() {
     this.faces = {};
+    this.doubtful = {};         // face letter -> which of its nine are unsure
     this.step = 0;
     this._repeat = this._repeatMsg = null;
     this._insisted = new Set();   // faces the user has already had the last word on
@@ -160,6 +162,13 @@ export class FaceScan {
       this.reader.fillFromGrid(data, sw, sh);
       if (this.reader.done && this.acceptCurrent()) return "done";
     }
+    // Longer still, and with a reflection strong enough that the grid itself
+    // is short of squares, take what there is rather than let the scan die
+    // here: what is read under protest is marked, not hidden.
+    if (waiting > LAST_RESORT_MS && res.grid && res.grid.found >= 6) {
+      this.reader.fillFromGrid(data, sw, sh);
+      if (this.reader.done && this.acceptCurrent()) return "done";
+    }
     if (waiting > PATIENCE_MS) {
       this.handOver(false);
       return "done";
@@ -187,6 +196,7 @@ export class FaceScan {
     this._repeat = this._repeatMsg = null;
     this._flash();
     this.faces[STEPS[this.step].face] = colors;
+    this.doubtful[STEPS[this.step].face] = this.reader.doubtful();
     this.onFrame({ step: this.step, faces: this.faces, current: [] });
     this.step += 1;
     this.reader.reset();
@@ -231,7 +241,7 @@ export class FaceScan {
       return true;      // true means "stop the frame loop", not "all done"
     }
     this.stop();
-    this.onDone(this.faces);
+    this.onDone(this.faces, this.doubtful);
     return true;
   }
 
@@ -366,6 +376,7 @@ export class FaceScan {
     this._manualForced = false;
     this._repeat = this._repeatMsg = null;
     this.faces[STEPS[this.step].face] = colors;
+    this.doubtful[STEPS[this.step].face] = [];    // placed by hand: their call
     this._flash();
     this.step += 1;
     this.reader.reset();

@@ -135,6 +135,27 @@ function dilate(mask, w, h, times) {
   }
   return mask;
 }
+// The colour of a sticker, ignoring the light bouncing off it.
+//
+// A highlight only ever ADDS light: the lamp reflected in the plastic turns
+// a red sticker pink and a blue one pale. The paint underneath is still
+// there in the pixels the reflection did not reach, so the colour is taken
+// from the darker part of the patch rather than from all of it. Without
+// this, a face with a reflection across it comes back as two or three
+// different colours.
+export function diffuseColor(rs, gs, bs) {
+  const n = rs.length;
+  const order = Array.from({ length: n }, (_, i) => i)
+    .sort((a, b) => (0.299 * rs[a] + 0.587 * gs[a] + 0.114 * bs[a]) -
+                    (0.299 * rs[b] + 0.587 * gs[b] + 0.114 * bs[b]));
+  const keep = order.slice(0, Math.max(1, Math.round(n * 0.6)));   // the darker 60%
+  const mid = (arr) => {
+    const v = keep.map((i) => arr[i]).sort((a, b) => a - b);
+    return v[v.length >> 1];
+  };
+  return [mid(rs), mid(gs), mid(bs)];
+}
+
 
 // Stickers as the holes of the cube's dark frame.
 //
@@ -199,10 +220,9 @@ export function segmentHoles(data, w, h, { colorFrom = null, minArea = 12, block
       rs.push(src[k]); gs.push(src[k + 1]); bs.push(src[k + 2]);
     }
     if (!rs.length) continue;
-    const med = (a) => { a.sort((x, y) => x - y); return a[a.length >> 1]; };
     blobs.push({
       cx, cy, area: count, size: Math.sqrt(count / 0.87),
-      rgb: [med(rs), med(gs), med(bs)],
+      rgb: diffuseColor(rs, gs, bs),
     });
   }
   return blobs;
@@ -272,19 +292,19 @@ export function segmentBlobs(data, w, h, { minArea = 10, maxArea = 0.16, split =
     // black line around the sticker, and averaging that in drags the colour
     // towards grey.
     const inner = 0.55 * Math.sqrt(count / Math.PI);
-    let cr = 0, cg = 0, cb = 0, cn = 0;
+    const rs = [], gs = [], bs = [];
     for (let t = 0; t < tail; t++) {
       const p = queue[t];
       const dx = (p % w) - cx, dy = ((p / w) | 0) - cy;
       if (dx * dx + dy * dy > inner * inner) continue;
       const k = p * 4;
-      cr += src[k]; cg += src[k + 1]; cb += src[k + 2]; cn++;
+      rs.push(src[k]); gs.push(src[k + 1]); bs.push(src[k + 2]);
     }
-    if (!cn) continue;
+    if (!rs.length) continue;
     blobs.push({
       cx, cy, area: count,
       size: Math.sqrt(count / 0.87),                     // side of a rhombic sticker
-      rgb: [cr / cn, cg / cn, cb / cn],
+      rgb: diffuseColor(rs, gs, bs),
     });
   }
   return blobs;

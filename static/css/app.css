@@ -319,3 +319,7 @@ footer { display: flex; justify-content: space-between; gap: 12px; padding: 14px
   .net { --cell: 22px; }
   .move-token { font-size: 1.1rem; padding: 5px 9px; }
 }
+
+/* the quiet button for sending a reading back when something reads wrong */
+.btn.small { font-size: .82rem; padding: .38rem .7rem; opacity: .75; }
+.btn.small:hover { opacity: 1; }

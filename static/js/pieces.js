@@ -62,11 +62,22 @@ function piecesOf(centreKeys, model, meta) {
 }
 
 // Places every piece where it costs least, each piece used exactly once.
-export function readPieces(lab, prototypes, centreKeys, model, meta) {
+export function readPieces(lab, prototypes, centreKeys, model, meta, { cap = 55, unsure = new Set() } = {}) {
   const { corners, edges } = piecesOf(centreKeys, model, meta);
+  // A sticker under a highlight can be any distance from its true colour: a
+  // red one with the lamp on it reads almost white. Left alone, that single
+  // sticker outvotes the other two of its corner and drags the whole
+  // assignment somewhere else. So how wrong a sticker may count is capped:
+  // past that it is simply "this does not match", and the rest of the piece
+  // decides.
+  // A sticker the camera could not read cleanly (a reflection sitting on it)
+  // still says something, but it should not outvote the ones that were read
+  // properly: a corner is decided by its other two.
+  const weight = (facelet) => (unsure.has(facelet) ? 0.25 : 1);
   const cost = (slot, piece, shift) =>
     slot.facelets.reduce((s, facelet, i) =>
-      s + labDist(lab[String(facelet)], prototypes[piece.colors[(i + shift) % piece.colors.length]]), 0);
+      s + weight(facelet) * Math.min(cap, labDist(lab[String(facelet)],
+        prototypes[piece.colors[(i + shift) % piece.colors.length]])), 0);
 
   const place = (group) => {
     const shifts = group[0].colors.length;        // 3 for a corner, 2 for an edge

@@ -7,7 +7,7 @@
 // work out the two directions of the grid from the patches themselves, and
 // place each patch in its row and column. No camera, no perspective fitting.
 
-import { segmentHoles, segmentBlobs, smooth } from "./detect.js";
+import { segmentHoles, segmentBlobs, smooth, diffuseColor } from "./detect.js";
 
 // Patches that belong to one flat 3x3 grid, arranged in rows and columns.
 export function detectFace(data, w, h) {
@@ -165,16 +165,22 @@ function dominantDirection(steps, avoid) {
 // blue in a colour (its chromaticity) and how bright a sticker is next to
 // the brightest one on the same face. That is what we compare.
 
-function stickerKey(rgb, maxLum) {
+function stickerKey(rgb, reference) {
   const sum = Math.max(1, rgb[0] + rgb[1] + rgb[2]);
   const lum = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
-  return [rgb[0] / sum, rgb[1] / sum, lum / Math.max(1, maxLum)];
+  return [rgb[0] / sum, rgb[1] / sum, lum / Math.max(1, reference)];
 }
 
 export function faceKeys(colors) {
   if (!colors || colors.length !== 9 || colors.some((c) => !c)) return null;
-  const maxLum = Math.max(...colors.map((c) => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]));
-  return colors.map((c) => stickerKey(c, maxLum));
+  const lums = colors.map((c) => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]);
+  // The middle sticker's brightness is the yardstick, not the brightest one.
+  // The brightest is very often the reflection itself, and measuring a face
+  // against its own reflection made two different faces with a highlight on
+  // them look like the same face: the scanner then kept insisting it already
+  // had a face it had never seen.
+  const reference = lums.slice().sort((a, b) => a - b)[4];
+  return colors.map((c) => stickerKey(c, reference));
 }
 
 const KEY_WEIGHT = [2.6, 2.6, 0.45];   // the colour's share matters, its brightness barely
@@ -210,33 +216,52 @@ export function patternDistance(a, b) {
   return best;
 }
 
-// Chosen by measurement, with the light swinging from 0.6x to 1.3x and tinted
-// warm and cold, on two cubes: one with red and orange close together and
-// highlights on the stickers (0.3% of repeated faces got through, 1.5% of new
-// faces refused) and one with a whole sticker misread now and then (0.1% and
-// 0.9%). Refusing a good face costs a button press; letting a repeat through
-// ruins the scan, so the threshold leans that way. The looser number is for
-// the check at the end, where the answer is a question to the user rather
-// than a decision taken behind their back.
-const SAME_FACE = 0.32;
-const SAME_FACE_LOOSE = 0.37;
+// How close two readings have to be before they are called the same face.
+// Measured with the light swinging from 0.6x to 1.3x and tinted warm and
+// cold. The looser number is for the check at the end, where the answer is a
+// question to the user rather than a decision taken behind their back.
+const SAME_FACE = 0.38;
+const SAME_FACE_LOOSE = 0.52;
+const SURELY_THE_SAME = 0.18;        // no argument at this distance
+const CLOSER_THAN_THE_NEXT = 0.55;   // ...or this much nearer than the runner-up
 
 // Is this face one of the faces already scanned?  Returns the matching entry
 // of `stored` ({ face, name, colors }) or null. A cube has six faces of six
 // different colours, so a face that matches one already stored is that one
 // being shown again: it must not be recorded twice, or the cube comes out
 // impossible at the end.
+//
+// The distance on its own cannot decide this, because how far apart two
+// different faces look depends on the cube and the light. Point a phone at a
+// face of a single colour and its white balance pulls that colour towards
+// grey, so on a cube with a face already solved every solid face comes back
+// washed out and they all look alike. Measured on such a cube, a fixed
+// threshold called a third of the new faces repeats, which is the scanner
+// refusing to move on.
+//
+// What decides it instead is the runner-up. A face being shown again is much
+// nearer to the one it repeats than to any other stored face, whatever the
+// light has done to the colours; a new face is more or less equally unlike
+// all of them. That comparison needs no number chosen in advance, and on a
+// solved cube it cut the repeats that slipped through from 10% to 3% while
+// refusing 1% of new faces.
 export function matchStored(colors, stored, limit = SAME_FACE) {
   const keys = faceKeys(colors);
   if (!keys) return null;
-  let best = null;
+  const ranked = [];
   for (const entry of stored) {
     const other = faceKeys(entry.colors);
-    if (!other) continue;
-    const distance = patternDistance(keys, other);
-    if (distance < limit && (!best || distance < best.distance)) best = { ...entry, distance };
+    if (other) ranked.push({ entry, distance: patternDistance(keys, other) });
   }
-  return best;
+  if (!ranked.length) return null;
+  ranked.sort((a, b) => a.distance - b.distance);
+  const [best, next] = ranked;
+  if (best.distance < SURELY_THE_SAME) return { ...best.entry, distance: best.distance };
+  if (!next) return best.distance < limit ? { ...best.entry, distance: best.distance } : null;
+  const near = best.distance < CLOSER_THAN_THE_NEXT * next.distance;
+  return near && best.distance < limit + 0.07
+    ? { ...best.entry, distance: best.distance }
+    : null;
 }
 
 // Last look before the cube is handed over: six faces, six colours. If two of
@@ -272,6 +297,14 @@ export function repeatedPair(stored) {
   return [stored[closest.j], stored[closest.i]];     // the later one first
 }
 
+// The colour where the grid says a sticker is, when no patch was found there.
+//
+// This one has to survive being slightly off target. Land half on the black
+// frame and the darkest pixels are the frame, not the sticker; land under a
+// reflection and the brightest are the lamp. Both tails are therefore thrown
+// away and the middle is kept. Reading the frame by mistake is not a small
+// error: it came out as a nearly black centre, and a centre is the colour of
+// a whole face, so one bad sample was turning six faces into nonsense.
 function medianAt(data, w, h, x, y, r) {
   const x0 = Math.max(0, Math.round(x - r)), y0 = Math.max(0, Math.round(y - r));
   const x1 = Math.min(w - 1, Math.round(x + r)), y1 = Math.min(h - 1, Math.round(y + r));
@@ -281,8 +314,69 @@ function medianAt(data, w, h, x, y, r) {
     const k = (py * w + px) * 4;
     rs.push(data[k]); gs.push(data[k + 1]); bs.push(data[k + 2]);
   }
-  const med = (a) => { a.sort((p, q) => p - q); return a[a.length >> 1]; };
-  return [med(rs), med(gs), med(bs)];
+  const n = rs.length;
+  if (!n) return null;
+  const order = Array.from({ length: n }, (_, i) => i)
+    .sort((a, b) => (0.299 * rs[a] + 0.587 * gs[a] + 0.114 * bs[a]) -
+                    (0.299 * rs[b] + 0.587 * gs[b] + 0.114 * bs[b]));
+  const keep = order.slice(Math.floor(n * 0.30), Math.max(1, Math.ceil(n * 0.75)));
+  const mid = (arr) => {
+    const v = keep.map((i) => arr[i]).sort((a, b) => a - b);
+    return v[v.length >> 1];
+  };
+  const lum = (i) => 0.299 * rs[i] + 0.587 * gs[i] + 0.114 * bs[i];
+  const spread = lum(order[Math.floor(n * 0.9)]) - lum(order[Math.floor(n * 0.1)]);
+  return { rgb: [mid(rs), mid(gs), mid(bs)], spread };
+}
+
+// ...and where exactly to take it. The point the grid gives is a guess, and
+// when only six of the nine stickers were found the guess can land on the
+// black frame between two of them. A frame reading is not a small error: it
+// came back as a nearly black centre, and a centre is the colour of a whole
+// face, so one bad sample turned the whole cube to nonsense. So a few nearby
+// spots are tried and the most uniform one wins, because the inside of a
+// sticker is flat and the frame never is.
+function sampleCell(data, w, h, x, y, size) {
+  const step = Math.max(1, size * 0.20);
+  const r = Math.max(2, size * 0.24);
+  let best = null;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const got = medianAt(data, w, h, x + dx * step, y + dy * step, r);
+      if (!got) continue;
+      const penalty = got.spread + (dx || dy ? 3 : 0);   // prefer where the grid said
+      if (!best || penalty < best.penalty) best = { ...got, penalty };
+    }
+  }
+  return best ? best.rgb : null;
+}
+
+// Is that colour a sticker at all?
+//
+// Two things on a cube are not stickers: the black frame between them, and
+// the lamp reflected in the plastic. Both were being recorded as if they
+// were colours. A frame read as a centre renames a whole face, which is how
+// a solved green face came back as a mixture. Rather than fixing it later,
+// such a reading is refused: the sticker stays unread, the user is asked to
+// move the cube a little, and the reflection moves with it.
+//
+// The test is against the face's own stickers, not against fixed numbers,
+// because a cube in the shade is darker everywhere.
+function plausible(grid) {
+  const lum = (c) => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+  const found = grid.cells.flat().filter((c) => c.rgb).map((c) => lum(c.rgb)).sort((a, b) => a - b);
+  if (found.length < 4) return () => true;
+  const middle = found[found.length >> 1];
+  // The frame is far darker than any sticker: the darkest colour on a cube is
+  // blue, at about a third of the brightness of white, while the frame is
+  // around a tenth. A quarter of the middle sticker separates them without
+  // ever throwing away a blue one.
+  //
+  // Only darkness is tested. Refusing bright samples as reflections was tried
+  // too and had to come out again: a white sticker under a strong light
+  // clips the sensor exactly as a reflection does, so the rule threw away
+  // real whites and made the reading worse than leaving the highlights in.
+  return (rgb) => lum(rgb) >= middle * 0.25;
 }
 
 // Reads one face over several frames, settling when the nine agree.
@@ -296,6 +390,7 @@ export class FaceReader {
   reset() {
     this.votes = Array.from({ length: 9 }, () => []);
     this.settled = new Array(9).fill(null);
+    this.forced = new Set();     // read under protest: a reflection sat on them
     this.lastGrid = null;
   }
 
@@ -308,8 +403,9 @@ export class FaceReader {
     if (!grid || grid.found < 5) {
       return { grid, read: this.read, message: "Enseña una cara entera, de frente y llenando el recuadro" };
     }
+    const believable = plausible(grid);
     grid.cells.forEach((row, r) => row.forEach((cell, c) => {
-      if (!cell.rgb) return;
+      if (!cell.rgb || !believable(cell.rgb)) return;
       const i = r * 3 + c;
       const list = this.votes[i];
       list.push(cell.rgb);
@@ -339,18 +435,29 @@ export class FaceReader {
     return this.settled.slice();
   }
 
+  // Which of the nine we are not sure about.
+  doubtful() {
+    return [...this.forced];
+  }
+
   // Finish a face whose last sticker refuses to settle (a highlight sitting on
   // it, usually): read it where the grid says it is. Returns how many were
   // filled in, so the caller can say so.
   fillFromGrid(data, w, h) {
     const grid = this.lastGrid;
     if (!grid) return 0;
+    const believable = plausible(grid);
     let filled = 0;
     grid.cells.forEach((row, r) => row.forEach((cell, c) => {
       const i = r * 3 + c;
       if (this.settled[i]) return;
-      const rgb = cell.rgb || medianAt(data, w, h, cell.xy[0], cell.xy[1], Math.max(2, grid.size * 0.22));
+      const rgb = cell.rgb || sampleCell(data, w, h, cell.xy[0], cell.xy[1], grid.size);
       if (!rgb) return;
+      // By now the user has been waiting, and a reflection that will not move
+      // should not hold up the whole scan. The reading is taken, but it is
+      // written down as doubtful so that what depends on it can weigh it
+      // less and the review can point at it.
+      if (!believable(rgb)) this.forced.add(i);
       this.settled[i] = rgb;
       filled++;
     }));
