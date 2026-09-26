@@ -6,13 +6,11 @@
   <title>Rubik con grafos</title>
   <meta name="description" content="Resuelve tu cubo de Rubik paso a paso y aprende la teoría de grafos que hay detrás.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'><rect x='1' y='1' width='8.5' height='8.5' rx='2' fill='%23c8252c'/><rect x='10.75' y='1' width='8.5' height='8.5' rx='2' fill='%23f7c928'/><rect x='20.5' y='1' width='8.5' height='8.5' rx='2' fill='%231f8a4c'/><rect x='1' y='10.75' width='8.5' height='8.5' rx='2' fill='%231f5fbf'/><rect x='10.75' y='10.75' width='8.5' height='8.5' rx='2' fill='%23f2f2ec'/><rect x='20.5' y='10.75' width='8.5' height='8.5' rx='2' fill='%23f2842a'/><rect x='1' y='20.5' width='8.5' height='8.5' rx='2' fill='%23f7c928'/><rect x='10.75' y='20.5' width='8.5' height='8.5' rx='2' fill='%231f8a4c'/><rect x='20.5' y='20.5' width='8.5' height='8.5' rx='2' fill='%23c8252c'/></svg>">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
   <script type="importmap">
   {"imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+    "three": "{{ url_for('static', filename='vendor/three/three.module.min.js') }}",
+    "three/addons/": "{{ url_for('static', filename='vendor/three/addons/') }}"
   }}
   </script>
 </head>
@@ -235,6 +233,13 @@
             <span class="panel-sub" id="tutor-status">Comprobando el LLM…</span>
           </div>
           <div class="tutor-log" id="tutor-log"></div>
+          <div class="tutor-quick" id="tutor-quick" aria-label="Preguntas rápidas">
+            <button type="button" class="chip" data-quick="notation">¿Qué significa este giro?</button>
+            <button type="button" class="chip" data-quick="why">¿Por qué este giro?</button>
+            <button type="button" class="chip" data-quick="left">¿Cuánto falta?</button>
+            <button type="button" class="chip" data-quick="replay">Repetir el giro</button>
+            <button type="button" class="chip" data-quick="lost">Me he perdido</button>
+          </div>
           <form class="tutor-form" id="tutor-form">
             <input id="tutor-input" placeholder="Pregunta lo que quieras sobre este paso…" autocomplete="off">
             <button class="btn" type="submit">Enviar</button>

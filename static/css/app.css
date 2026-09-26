@@ -1,3 +1,21 @@
+/* Fonts served from this app, not from Google: the page loads nothing from
+   outside, and nobody else sees who opens it. Variable fonts, one file each
+   for every weight, Latin subset (covers Spanish). Licences next to them. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("../vendor/fonts/inter-latin-wght-normal.woff2") format("woff2-variations");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url("../vendor/fonts/jetbrains-mono-latin-wght-normal.woff2") format("woff2-variations");
+}
+
 :root {
   --bg: #faf8f3;
   --surface: #ffffff;
@@ -284,6 +302,9 @@ svg .mono { font-family: var(--mono); }
 .msg.user { align-self: flex-end; background: var(--accent-soft); }
 .msg.assistant { align-self: flex-start; background: var(--surface-2); }
 .msg.pending { color: var(--ink-3); font-style: italic; }
+.tutor-quick { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.chip { font: inherit; font-size: .82rem; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); cursor: pointer; }
+.chip:hover { border-color: var(--accent); color: var(--accent); }
 .tutor-form { display: flex; gap: 8px; }
 .tutor-form input { flex: 1; font: inherit; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); min-width: 0; }
 

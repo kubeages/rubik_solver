@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 import time
 
@@ -128,3 +129,33 @@ def ask(question: str, context: dict, history: list) -> str | None:
         log.warning("tutor unavailable: %s", e)
         invalidate_probe()
         return None
+
+
+# A turn written in the notation: one face letter, then nothing, a prime or a 2,
+# standing on its own (not inside a word, not in lower case, which would be
+# another notation altogether).
+_MOVE = re.compile(r"(?<![\wÀ-ÿ])([URFDLB])(['’′]|2)?(?![\wÀ-ÿ'’′])")
+# "la cara U" names a face and "el plan B" is a figure of speech: neither asks
+# for a turn
+_FACE_NAMED = re.compile(r"\b(?:cara|capa|centro|plan|opción|opcion|tipo)\s+$", re.IGNORECASE)
+
+
+def invented_moves(answer: str, allowed: list[str]) -> list[str]:
+    """Turns the reply mentions that are nowhere in this step or its neighbours.
+
+    The LLM kept telling people to make turns that were not in the plan, which
+    its instructions already forbid. Mentioning a neighbour ("si hicieras R'
+    volverías atrás") is fair; a turn that is neither in this step nor among
+    the edges leaving it was made up. Returns them in order, without repeats.
+    """
+    if not allowed:
+        return []
+    ok = {m.replace("’", "'").replace("′", "'") for m in allowed}
+    found = []
+    for match in _MOVE.finditer(answer):
+        if _FACE_NAMED.search(answer[:match.start()]):
+            continue
+        move = match.group(1) + ("'" if match.group(2) in ("'", "’", "′") else (match.group(2) or ""))
+        if move not in ok and move not in found:
+            found.append(move)
+    return found

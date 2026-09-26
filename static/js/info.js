@@ -133,8 +133,16 @@ export const INFO = {
   tutor: {
     title: "El tutor",
     html: `
-      <p>Un modelo de lenguaje que recibe el contexto del paso en el que estás (la fase, el
-      movimiento, las distancias y los vecinos) y responde a lo que le preguntes.</p>
+      <p>Dos formas de preguntar.</p>
+      <h4>Las preguntas rápidas</h4>
+      <p>Los botones de abajo (<b>qué significa este giro</b>, <b>por qué</b>, <b>cuánto falta</b>,
+      repetir y me he perdido) no pasan por ningún modelo: se contestan con los datos del camino
+      calculado, así que <b>siempre son correctas y funcionan aunque el modelo esté caído</b>.</p>
+      <h4>Pregunta libre</h4>
+      <p>Lo que escribas va a un modelo de lenguaje que recibe el contexto del paso en el que estás
+      (la fase, el movimiento, las distancias y los vecinos). Antes de enseñarte su respuesta se
+      comprueba que no te mande hacer un giro que no sea de este paso ni de sus vecinos; si lo hace,
+      en su lugar ves la explicación exacta del paso.</p>
       <h4>El punto de color</h4>
       <ul>
         <li><span style="color:var(--good)">Verde</span>: el modelo responde. Al lado verás cuál es
@@ -340,7 +348,9 @@ export function techLines(key, ctx) {
         ["Estado", tutor || "—"],
         ["Comprobación", "GET /v1/models con 6 s de límite, cacheada 30 s en el servidor"],
         ["Contexto enviado", "modo, fase, objetivo, movimiento elegido, distancias y los vecinos con su distancia"],
-        ["Aviso", "el modelo puede equivocarse; los movimientos no salen de él, sino del solver"],
+        ["Preguntas rápidas", "respondidas en el navegador con los datos del plan, sin modelo ni red"],
+        ["Comprobación de respuestas", "se buscan en la respuesta giros en notación (R, U', F2…) y se comparan con los del paso y sus vecinos; uno inventado sustituye la respuesta por la explicación del plan"],
+        ["Aviso", "el modelo puede equivocarse en las explicaciones; los movimientos no salen de él, sino del solver"],
       ];
     case "capture":
       return [

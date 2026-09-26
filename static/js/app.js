@@ -606,7 +606,7 @@ async function runValidate() {
     } else {
       st.className = "review-status err";
       st.textContent = r.error;
-      markGuilty(r.error);
+      markGuilty(r.piece);
     }
   } catch (e) {
     st.className = "review-status err";
@@ -617,16 +617,14 @@ async function runValidate() {
 
 // The server names the piece it cannot make sense of; show which stickers
 // those are, so there is somewhere to look.
-function markGuilty(error) {
+function markGuilty(piece) {
   app.guilty = new Set();
-  const corner = (error.match(/esquina ([A-Z]{3})/) || [])[1];
-  const edge = (error.match(/arista ([A-Z]{2})/) || [])[1];
-  if (corner) {
-    const i = app.meta.corner_names.indexOf(corner);
-    if (i >= 0) app.meta.corner_facelets[i].forEach((f) => app.guilty.add(f));
-  } else if (edge) {
-    const i = app.meta.edge_names.indexOf(edge);
-    if (i >= 0) app.meta.edge_facelets[i].forEach((f) => app.guilty.add(f));
+  if (piece) {
+    const corner = piece.kind === "corner";
+    const names = corner ? app.meta.corner_names : app.meta.edge_names;
+    const facelets = corner ? app.meta.corner_facelets : app.meta.edge_facelets;
+    const i = names.indexOf(piece.name);
+    if (i >= 0) facelets[i].forEach((f) => app.guilty.add(f));
   }
   renderNet();
 }
@@ -737,17 +735,17 @@ function stageBounds() {
 function renderStageStrip() {
   const strip = $("stage-strip");
   strip.innerHTML = "";
-  for (const b of stageBounds()) {
+  stageBounds().forEach((b, index) => {
     const seg = document.createElement("div");
     seg.className = "seg";
     seg.style.flexGrow = Math.max(1, b.to - b.from);
-    const num = (b.stage.title.match(/^(?:Fase )?(\d+)/) || [])[1] || "";
+    const num = index + 1;                // the stages come in the order they are done
     seg.innerHTML = `<div class="bar"><i></i></div>${num}`;
     seg.title = b.stage.title;
     seg.dataset.from = b.from;
     seg.dataset.to = b.to;
     strip.appendChild(seg);
-  }
+  });
 }
 
 function updateStageStrip() {
@@ -901,6 +899,10 @@ function tutorContext() {
     distancia_antes: step.d_before, distancia_despues: step.d_after,
     cota_inferior: step.h_before,
     vecinos: step.neighbors.map((n) => `${n.short || n.label}:${n.d ?? "sale de H"}`).join(", "),
+    // every turn it is fair to mention: this step's and those of the edges
+    // leaving it. The server checks the reply against this list.
+    giros_posibles: [...new Set([...step.moves,
+      ...step.neighbors.flatMap((n) => String(n.alg || n.label).split(/\s+/))].filter(Boolean))],
   };
 }
 
@@ -933,7 +935,8 @@ function setTutorStatus(ok, detail) {
   const dot = $("tutor-dot");
   dot.className = "status-dot " + (ok ? "ok" : "down");
   dot.title = (ok ? "El tutor responde" : "El tutor no responde") + ": " + detail + " · pulsa para volver a comprobar";
-  $("tutor-status").textContent = detail + (ok ? "" : " · pulsa el punto para reintentar");
+  $("tutor-status").textContent = detail +
+    (ok ? "" : " · pulsa el punto para reintentar · las preguntas rápidas siguen funcionando");
   setTutorControls(ok);
 }
 
@@ -943,23 +946,84 @@ function setTutorControls(on) {
   $("btn-explain").hidden = !on;
 }
 
-async function askTutor(question) {
+function tutorSay(role, text, cls = "") {
   const log = $("tutor-log");
-  const add = (role, text, cls = "") => {
-    const d = document.createElement("div");
-    d.className = `msg ${role} ${cls}`;
-    d.textContent = text;
-    log.appendChild(d);
-    log.scrollTop = log.scrollHeight;
-    return d;
-  };
+  const d = document.createElement("div");
+  d.className = `msg ${role} ${cls}`;
+  d.textContent = text;
+  log.appendChild(d);
+  log.scrollTop = log.scrollHeight;
+  return d;
+}
+
+// ---- quick questions -------------------------------------------------------
+//
+// The questions people ask most have exact answers in data the app already
+// holds: what a letter means, why this turn, how much is left. Answering them
+// here means they are always right (the LLM kept getting exactly these wrong,
+// which is why its instructions list them), they work when the LLM is down,
+// and nothing leaves the machine. Free text still goes to the LLM.
+
+function quickAnswer(kind) {
+  const plan = app.plan;
+  const step = plan && plan.steps[app.k];
+  if (!step) return "¡Ya está resuelto! No queda ningún giro.";
+  const stage = stageOf(step);
+  if (kind === "notation") {
+    const distinct = [...new Set(step.moves)];
+    // the same wording as the step card, so the two never disagree
+    const lines = distinct.map((m) => `${m}: gira ${describeMove(m)}, mirando esa cara de frente.`);
+    const intro = step.moves.length > 1
+      ? `Este paso es «${step.label}», un algoritmo de ${step.moves.length} giros: ${step.moves.join(" ")}. Cada letra es un giro de una cara, no una pieza:\n`
+      : "Cada letra es un giro de una cara, no una pieza:\n";
+    return intro + lines.join("\n");
+  }
+  if (kind === "why") {
+    return `Fase «${stage.title}»: ${stage.goal}\n\n${explain(step, stage)}`;
+  }
+  if (kind === "left") {
+    const total = plan.steps.length;
+    const movesLeft = plan.steps.slice(app.k).reduce((n, s) => n + s.moves.length, 0);
+    const bound = stageBounds().find((b) => app.k >= b.from && app.k < b.to);
+    const inStage = bound ? bound.to - app.k : 0;
+    return `Vas por el paso ${app.k + 1} de ${total}. Quedan ${total - app.k} pasos, ` +
+      `${movesLeft} ${movesLeft === 1 ? "giro" : "giros"} en total.` +
+      (bound ? ` De la fase «${stage.title}» te ${inStage === 1 ? "queda este paso" : `quedan ${inStage} pasos`}.` : "");
+  }
+  return "";
+}
+
+function askQuick(kind, label) {
+  if (kind === "lost") { $("btn-lost").click(); return; }
+  tutorSay("user", label);
+  if (kind === "replay") {
+    playStep(0);
+    tutorSay("assistant", "Repitiendo el giro en el cubo 3D.");
+    return;
+  }
+  const answer = quickAnswer(kind);
+  tutorSay("assistant", answer);
+  app.tutorHistory.push({ role: "user", content: label }, { role: "assistant", content: answer });
+}
+
+async function askTutor(question) {
+  const add = tutorSay;
   add("user", question);
   const pending = add("assistant", "Pensando…", "pending");
   try {
     const r = await api("/api/tutor", { question, context: tutorContext(), history: app.tutorHistory });
-    pending.textContent = r.answer;
+    // A reply that tells you to make a turn which is neither in this step nor
+    // among its neighbours was made up; showing it would send someone turning
+    // the wrong face. The exact explanation of the step goes in its place.
+    let answer = r.answer;
+    if (r.invented && r.invented.length) {
+      answer = `El tutor ha mencionado ${r.invented.length === 1 ? "un giro" : "giros"} que no ` +
+        `${r.invented.length === 1 ? "es" : "son"} de este paso (${r.invented.join(", ")}), así que no te ` +
+        `enseño su respuesta. Esto es lo que dice el plan:\n\n${quickAnswer("why")}`;
+    }
+    pending.textContent = answer;
     pending.classList.remove("pending");
-    app.tutorHistory.push({ role: "user", content: question }, { role: "assistant", content: r.answer });
+    app.tutorHistory.push({ role: "user", content: question }, { role: "assistant", content: answer });
     setTutorStatus(true, "Conectado · " + (app.meta.tutor_model || "LLM"));
   } catch (e) {
     pending.textContent = "El tutor no está disponible ahora mismo. La explicación del paso sigue arriba.";
@@ -1065,6 +1129,9 @@ async function boot() {
     $("tutor-input").value = "";
     askTutor(q);
   };
+  document.querySelectorAll("#tutor-quick [data-quick]").forEach((b) => {
+    b.onclick = () => askQuick(b.dataset.quick, b.textContent);
+  });
   $("btn-explain").onclick = () => askTutor("Explícame este paso con otras palabras: qué hago con el cubo y qué significa en el grafo.");
   $("tutor-dot").onclick = () => { if (app.meta.tutor) checkTutor(true); };
   checkTutor(false);

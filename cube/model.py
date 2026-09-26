@@ -215,7 +215,16 @@ EDGE_COLORS = [[SOLVED[i] for i in fs] for fs in EDGE_FACELETS]
 
 
 class InvalidCube(ValueError):
-    """Raised with a user-facing (Spanish) message when a cube cannot exist."""
+    """Raised with a user-facing (Spanish) message when a cube cannot exist.
+
+    When one piece is to blame, `piece` names it ({"kind": "corner"|"edge",
+    "name": "URF"}), so the browser can point at its stickers without having
+    to read them back out of the Spanish sentence.
+    """
+
+    def __init__(self, message: str, piece: dict | None = None):
+        super().__init__(message)
+        self.piece = piece
 
 
 @dataclass
@@ -278,18 +287,21 @@ class CubieCube:
             cols = [s[j] for j in CORNER_FACELETS[i]]
             ori = next((k for k in range(3) if cols[k] in "UD"), None)
             if ori is None:
-                raise InvalidCube(f"La esquina {CORNER_NAMES[i]} no tiene color de arriba ni de abajo")
+                raise InvalidCube(f"La esquina {CORNER_NAMES[i]} no tiene color de arriba ni de abajo",
+                                  {"kind": "corner", "name": CORNER_NAMES[i]})
             c1, c2 = cols[(ori + 1) % 3], cols[(ori + 2) % 3]
             for j in range(8):
                 if set(CORNER_COLORS[j]) == set(cols):
                     if (CORNER_COLORS[j][1], CORNER_COLORS[j][2]) != (c1, c2):
                         raise InvalidCube(
                             f"La esquina {CORNER_NAMES[i]} tiene sus colores en un orden imposible: "
-                            "revisa esas tres pegatinas")
+                            "revisa esas tres pegatinas",
+                            {"kind": "corner", "name": CORNER_NAMES[i]})
                     cp[i], co[i] = j, ori
                     break
             else:
-                raise InvalidCube(f"La esquina {CORNER_NAMES[i]} tiene una combinación de colores imposible")
+                raise InvalidCube(f"La esquina {CORNER_NAMES[i]} tiene una combinación de colores imposible",
+                                  {"kind": "corner", "name": CORNER_NAMES[i]})
         for i in range(12):
             cols = [s[j] for j in EDGE_FACELETS[i]]
             for j in range(12):
@@ -300,7 +312,8 @@ class CubieCube:
                     ep[i], eo[i] = j, 1
                     break
             else:
-                raise InvalidCube(f"La arista {EDGE_NAMES[i]} tiene una combinación de colores imposible")
+                raise InvalidCube(f"La arista {EDGE_NAMES[i]} tiene una combinación de colores imposible",
+                                  {"kind": "edge", "name": EDGE_NAMES[i]})
         return cls(cp, co, ep, eo)
 
     def corner_parity(self) -> int:

@@ -79,7 +79,7 @@ def api_validate():
     try:
         validate(facelets)
     except InvalidCube as e:
-        return jsonify({"ok": False, "error": str(e)})
+        return jsonify({"ok": False, "error": str(e), "piece": e.piece})
     return jsonify({"ok": True, "solved": facelets == SOLVED})
 
 
@@ -161,10 +161,13 @@ def api_tutor():
     question = (data.get("question") or "").strip()[:1000]
     if not question:
         return jsonify({"error": "Pregunta vacía"}), 400
-    answer = tutor.ask(question, data.get("context") or {}, data.get("history") or [])
+    context = data.get("context") or {}
+    answer = tutor.ask(question, context, data.get("history") or [])
     if answer is None:
         return jsonify({"error": "El tutor no está disponible ahora mismo"}), 503
-    return jsonify({"answer": answer})
+    allowed = context.get("giros_posibles") if isinstance(context, dict) else None
+    invented = tutor.invented_moves(answer, allowed if isinstance(allowed, list) else [])
+    return jsonify({"answer": answer, "invented": invented})
 
 
 @app.route("/api/tutor/status")

@@ -21,6 +21,19 @@ def test_validate(client):
     assert bad["ok"] is False and bad["error"]
 
 
+def test_validate_names_the_guilty_piece(client):
+    # swap two stickers of the URF corner: its colours come out in an order
+    # no corner has, and the reply says which corner, as data
+    f = list(SOLVED)
+    f[8], f[9] = f[9], f[8]
+    bad = client.post("/api/validate", json={"facelets": "".join(f)}).get_json()
+    assert bad["ok"] is False
+    assert bad["piece"] == {"kind": "corner", "name": "URF"}
+    # a fault that is not one piece's fault names no piece
+    whole = client.post("/api/validate", json={"facelets": "U" * 54}).get_json()
+    assert whole["piece"] is None
+
+
 @pytest.mark.parametrize("mode", ["fast", "learn"])
 def test_solve(client, mode):
     f = client.get("/api/random").get_json()["facelets"]
@@ -103,3 +116,22 @@ def test_wrong_model_is_reported(client, monkeypatch):
     s = client.get("/api/tutor/status").get_json()
     assert s["ok"] is False and "no sirve el modelo" in s["detail"]
     monkeypatch.setattr(tutor, "_probe_cache", None)
+
+
+def test_invented_moves_are_caught():
+    from cube.tutor import invented_moves
+    allowed = ["R", "U", "R'", "U'", "F2"]
+    assert invented_moves("Haz R U R' U' y ya está.", allowed) == []
+    assert invented_moves("Si hicieras F2 volverías atrás.", allowed) == []   # a neighbour: fair
+    assert invented_moves("Ahora gira D2 para colocar la esquina.", allowed) == ["D2"]
+    assert invented_moves("Gira R’ y luego U.", allowed) == []                # typographic prime
+    assert invented_moves("Mira la cara U y el plan B.", allowed) == []       # names, not turns
+    assert invented_moves("Sin contexto no se comprueba nada: D2.", []) == []
+
+
+def test_tutor_reply_reports_invented_moves(client, monkeypatch):
+    from cube import tutor
+    monkeypatch.setattr(tutor, "ask", lambda q, c, h: "Gira L2 y después R.")
+    res = client.post("/api/tutor", json={"question": "¿qué hago?",
+                                          "context": {"giros_posibles": ["R", "U"]}})
+    assert res.get_json() == {"answer": "Gira L2 y después R.", "invented": ["L2"]}
