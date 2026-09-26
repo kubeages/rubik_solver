@@ -236,8 +236,13 @@ p { margin: 0 0 .8em; }
 }
 .move-token.playing { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .move-token.done { opacity: .5; }
-.step-label { font-weight: 600; margin: 4px 0; }
-.step-text { color: var(--ink-2); font-size: .93rem; }
+/* The line saying which turn to make changes with every turn and can take one
+   line or two. Room for two is kept whatever it says, and the explanation,
+   whose length varies most, goes under the buttons: otherwise "Hecho" moved
+   under the finger of someone pressing it turn after turn, and a press could
+   land on something else. */
+.step-label { font-weight: 600; margin: 4px 0; line-height: 1.45; min-height: 2.9em; }
+.step-text { color: var(--ink-2); font-size: .93rem; margin-top: 10px; }
 .step-actions { display: flex; gap: 10px; justify-content: space-between; margin-top: 8px; }
 .step-actions .btn.primary { flex: 1; }
 .step-extra { margin-top: 6px; text-align: center; }

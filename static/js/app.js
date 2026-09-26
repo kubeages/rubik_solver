@@ -860,8 +860,9 @@ function explain(step, stage) {
     `Faltan ${step.d_before} giros; la cota inferior es ${step.h_before}.`;
 }
 
-function showStep(k) {
+function showStep(k, sub = 0) {
   app.k = k;
+  app.sub = sub;              // which turn of this step's algorithm is next
   const plan = app.plan;
   const steps = plan.steps;
   updateStageStrip();
@@ -872,10 +873,7 @@ function showStep(k) {
   const step = steps[k];
   const stage = stageOf(step);
   $("step-stage").textContent = stage.title;
-  $("step-counter").textContent = `Paso ${k + 1} de ${steps.length}`;
-  $("step-label").textContent = step.moves.length > 1 ? step.label : `Gira ${describeMove(step.moves[0])}`;
   $("step-text").textContent = explain(step, stage);
-  $("btn-prev").disabled = k === 0;
 
   const tokens = $("step-moves");
   tokens.innerHTML = "";
@@ -884,7 +882,7 @@ function showStep(k) {
     t.className = "move-token";
     t.textContent = m;
     t.title = describeMove(m);
-    t.onclick = () => playStep(i);
+    t.onclick = () => { app.sub = i; showMove(); };
     tokens.appendChild(t);
   });
 
@@ -923,30 +921,73 @@ function showStep(k) {
     drawPath($("path-graph"), series, k, { bounds, separators: [plan.search.phase1_length] });
     $("path-sub").textContent = "Giros que faltan (continua) y cota inferior (discontinua)";
   }
-  playStep(0);
+  showMove();
+}
+
+// One turn at a time. A step of the learning mode is often a whole algorithm
+// (eight turns, say), and playing it through in one go was too fast to follow
+// even at the slowest speed. So each turn waits for "Hecho" like a step does:
+// the counter says which turn of the algorithm this is, the 3D cube shows just
+// that turn, and only after the last one does "Hecho" move on to the next
+// step. The graphs stay on the step, because for them the whole algorithm is
+// a single edge.
+function showMove() {
+  const steps = app.plan.steps;
+  const step = steps[app.k];
+  const n = step.moves.length;
+  const move = step.moves[app.sub];
+  $("step-counter").textContent = n > 1
+    ? `Paso ${app.k + 1} de ${steps.length} · giro ${app.sub + 1} de ${n}`
+    : `Paso ${app.k + 1} de ${steps.length}`;
+  $("step-label").textContent = n > 1
+    ? `${step.label} · ahora ${move}: gira ${describeMove(move)}`
+    : `Gira ${describeMove(move)}`;
+  $("btn-prev").disabled = app.k === 0 && app.sub === 0;
+  $("btn-done").textContent = n > 1 && app.sub < n - 1 ? "Hecho ✓ · siguiente giro" : "Hecho ✓";
+  playMove();
+}
+
+// Show the cube as it is before the current turn, then animate that turn.
+function playMove() {
+  const step = app.plan.steps[app.k];
+  const i = app.sub;
+  const before = app.model.applyAll(app.states[app.k], step.moves.slice(0, i));
+  [...$("step-moves").children].forEach((t, j) => {
+    t.classList.toggle("playing", j === i);
+    t.classList.toggle("done", j < i);
+  });
+  if (app.cube3d) {
+    app.cube3d.jumpTo(before);
+    app.cube3d.play([step.moves[i]]);
+  }
+  app.graph.jumpTo(before);
+  app.graph.play([step.moves[i]]);
+}
+
+function nextMove() {
+  const step = app.plan.steps[app.k];
+  if (step && app.sub < step.moves.length - 1) {
+    app.sub += 1;
+    showMove();
+  } else {
+    showStep(app.k + 1);
+  }
+}
+
+function previousMove() {
+  if (app.sub > 0) {
+    app.sub -= 1;
+    showMove();
+  } else if (app.k > 0) {
+    const before = app.plan.steps[app.k - 1];
+    showStep(app.k - 1, before.moves.length - 1);
+  }
 }
 
 function describeMove(m) {
   const names = { U: "la cara de arriba", D: "la cara de abajo", R: "la cara derecha", L: "la cara izquierda", F: "la cara de delante", B: "la cara de detrás" };
   const how = m.endsWith("2") ? "media vuelta" : m.endsWith("'") ? "un cuarto en sentido antihorario" : "un cuarto en sentido horario";
   return `${names[m[0]]} ${how}`;
-}
-
-function playStep(from = 0) {
-  const step = app.plan.steps[app.k];
-  const before = app.model.applyAll(app.states[app.k], step.moves.slice(0, from));
-  const rest = step.moves.slice(from);
-  const tokens = [...$("step-moves").children];
-  const mark = (i) => tokens.forEach((t, j) => {
-    t.classList.toggle("playing", j === i + from);
-    t.classList.toggle("done", j < i + from);
-  });
-  if (app.cube3d) {
-    app.cube3d.jumpTo(before);
-    app.cube3d.play(rest, { onMove: mark });
-  }
-  app.graph.jumpTo(before);
-  app.graph.play(rest);
 }
 
 async function finish() {
@@ -976,6 +1017,7 @@ function tutorContext() {
     fase: stage.title, objetivo_fase: stage.goal, grafo_fase: stage.graph,
     paso: `${app.k + 1} de ${app.plan.steps.length}`,
     arista_elegida: step.label, giros: step.moves.join(" "),
+    giro_actual: `${step.moves[app.sub || 0]} (${(app.sub || 0) + 1} de ${step.moves.length})`,
     distancia_antes: step.d_before, distancia_despues: step.d_after,
     cota_inferior: step.h_before,
     vecinos: step.neighbors.map((n) => `${n.short || n.label}:${n.d ?? "sale de H"}`).join(", "),
@@ -1063,7 +1105,7 @@ function quickAnswer(kind) {
   }
   if (kind === "left") {
     const total = plan.steps.length;
-    const movesLeft = plan.steps.slice(app.k).reduce((n, s) => n + s.moves.length, 0);
+    const movesLeft = plan.steps.slice(app.k).reduce((n, s) => n + s.moves.length, 0) - (app.sub || 0);
     const bound = stageBounds().find((b) => app.k >= b.from && app.k < b.to);
     const inStage = bound ? bound.to - app.k : 0;
     return `Vas por el paso ${app.k + 1} de ${total}. Quedan ${total - app.k} pasos, ` +
@@ -1077,7 +1119,7 @@ function askQuick(kind, label) {
   if (kind === "lost") { $("btn-lost").click(); return; }
   tutorSay("user", label);
   if (kind === "replay") {
-    playStep(0);
+    playMove();
     tutorSay("assistant", "Repitiendo el giro en el cubo 3D.");
     return;
   }
@@ -1188,9 +1230,9 @@ async function boot() {
   $("btn-solve").onclick = solve;
   document.querySelectorAll("input[name=mode]").forEach((r) => r.addEventListener("change", renderBasePicker));
 
-  $("btn-done").onclick = () => showStep(app.k + 1);
-  $("btn-prev").onclick = () => { if (app.k > 0) showStep(app.k - 1); };
-  $("btn-replay").onclick = () => playStep(0);
+  $("btn-done").onclick = nextMove;
+  $("btn-prev").onclick = previousMove;
+  $("btn-replay").onclick = playMove;
   $("btn-reset-view").onclick = () => app.cube3d && app.cube3d.resetView();
   $("speed").oninput = (e) => {
     if (app.cube3d) app.cube3d.speed = +e.target.value;

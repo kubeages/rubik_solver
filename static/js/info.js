@@ -39,8 +39,12 @@ export const INFO = {
       <h4>Qué puedes hacer</h4>
       <ul>
         <li><b>Hecho ✓</b> cuando ya lo has girado en tu cubo. También vale la tecla → o Intro.</li>
-        <li><b>‹ Atrás</b> para volver al paso anterior (tecla ←). Deshaz también el giro en tu cubo.</li>
-        <li>Pulsa <b>un giro concreto</b> de la secuencia para repetir la animación desde ahí.</li>
+        <li>Si el paso es un <b>algoritmo de varios giros</b>, se avanza <b>giro a giro</b>: arriba verás
+        «giro 2 de 8», el cubo 3D enseña solo ese giro y el botón dice «siguiente giro» hasta el último.
+        Así puedes ir a tu ritmo y memorizarlo.</li>
+        <li><b>‹ Atrás</b> retrocede un giro (tecla ←); desde el primero, vuelve al último giro del paso
+        anterior. Deshaz también el giro en tu cubo.</li>
+        <li>Pulsa <b>un giro concreto</b> de la secuencia para ir a él, y <b>↻</b> para verlo otra vez.</li>
       </ul>`,
   },
 
