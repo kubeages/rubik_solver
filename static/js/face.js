@@ -165,30 +165,40 @@ function dominantDirection(steps, avoid) {
 // blue in a colour (its chromaticity) and how bright a sticker is next to
 // the brightest one on the same face. That is what we compare.
 
-function stickerKey(rgb, reference) {
-  const sum = Math.max(1, rgb[0] + rgb[1] + rgb[2]);
-  const lum = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
-  return [rgb[0] / sum, rgb[1] / sum, lum / Math.max(1, reference)];
+function toLab([r, g, b]) {
+  const lin = (c) => { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+  const R = lin(r), G = lin(g), B = lin(b);
+  let X = (0.4124 * R + 0.3576 * G + 0.1805 * B) / 0.95047;
+  let Y = 0.2126 * R + 0.7152 * G + 0.0722 * B;
+  let Z = (0.0193 * R + 0.1192 * G + 0.9505 * B) / 1.08883;
+  const f = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
+  X = f(X); Y = f(Y); Z = f(Z);
+  return [116 * Y - 16, 500 * (X - Y), 200 * (Y - Z)];
 }
 
+// Each sticker described in Lab, after bringing the whole face to a common
+// exposure: the middle sticker's brightness is the yardstick (the brightest
+// is too often a reflection), so a face read in the shade and the same face
+// read in the sun describe themselves alike.
 export function faceKeys(colors) {
   if (!colors || colors.length !== 9 || colors.some((c) => !c)) return null;
   const lums = colors.map((c) => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]);
-  // The middle sticker's brightness is the yardstick, not the brightest one.
-  // The brightest is very often the reflection itself, and measuring a face
-  // against its own reflection made two different faces with a highlight on
-  // them look like the same face: the scanner then kept insisting it already
-  // had a face it had never seen.
-  const reference = lums.slice().sort((a, b) => a - b)[4];
-  return colors.map((c) => stickerKey(c, reference));
+  const reference = Math.max(1, lums.slice().sort((a, b) => a - b)[4]);
+  const k = 140 / reference;
+  return colors.map((c) => toLab(c.map((v) => Math.min(255, v * k))));
 }
 
-const KEY_WEIGHT = [2.6, 2.6, 0.45];   // the colour's share matters, its brightness barely
+// The same comparison the colour classifier uses, and for the same reason:
+// on photos of the real cube, a face turned to the window loses brightness
+// and strength of colour but keeps its hue. Hue counts in full, lightness and
+// chroma for less. Divided by 100 so the numbers stay near the old scale.
 function keyDistance(a, b) {
-  return Math.hypot(
-    KEY_WEIGHT[0] * (a[0] - b[0]),
-    KEY_WEIGHT[1] * (a[1] - b[1]),
-    KEY_WEIGHT[2] * (a[2] - b[2]));
+  const c1 = Math.hypot(a[1], a[2]), c2 = Math.hypot(b[1], b[2]);
+  let dh = Math.atan2(a[2], a[1]) - Math.atan2(b[2], b[1]);
+  if (dh > Math.PI) dh -= 2 * Math.PI;
+  if (dh < -Math.PI) dh += 2 * Math.PI;
+  const dH = 2 * Math.sqrt(c1 * c2) * Math.sin(dh / 2);
+  return Math.hypot(0.35 * (a[0] - b[0]), 0.6 * (c1 - c2), dH) / 100;
 }
 
 const TURN = [6, 3, 0, 7, 4, 1, 8, 5, 2];   // the nine stickers after a quarter turn
@@ -220,10 +230,10 @@ export function patternDistance(a, b) {
 // Measured with the light swinging from 0.6x to 1.3x and tinted warm and
 // cold. The looser number is for the check at the end, where the answer is a
 // question to the user rather than a decision taken behind their back.
-const SAME_FACE = 0.38;
-const SAME_FACE_LOOSE = 0.52;
-const SURELY_THE_SAME = 0.18;        // no argument at this distance
-const CLOSER_THAN_THE_NEXT = 0.55;   // ...or this much nearer than the runner-up
+const SAME_FACE = 0.18;              // with a single stored face to compare
+const SAME_FACE_LOOSE = 0.24;        // the last look at the end
+const SURELY_THE_SAME = 0.08;        // no argument at this distance
+const CLOSER_THAN_THE_NEXT = 0.62;   // ...or this much nearer than the runner-up
 
 // Is this face one of the faces already scanned?  Returns the matching entry
 // of `stored` ({ face, name, colors }) or null. A cube has six faces of six
@@ -244,7 +254,8 @@ const CLOSER_THAN_THE_NEXT = 0.55;   // ...or this much nearer than the runner-u
 // light has done to the colours; a new face is more or less equally unlike
 // all of them. That comparison needs no number chosen in advance, and on a
 // solved cube it cut the repeats that slipped through from 10% to 3% while
-// refusing 1% of new faces.
+// refusing 1% of new faces; with the hue-based comparison below, 0.7% and
+// 0.7%.
 export function matchStored(colors, stored, limit = SAME_FACE) {
   const keys = faceKeys(colors);
   if (!keys) return null;
@@ -259,7 +270,7 @@ export function matchStored(colors, stored, limit = SAME_FACE) {
   if (best.distance < SURELY_THE_SAME) return { ...best.entry, distance: best.distance };
   if (!next) return best.distance < limit ? { ...best.entry, distance: best.distance } : null;
   const near = best.distance < CLOSER_THAN_THE_NEXT * next.distance;
-  return near && best.distance < limit + 0.07
+  return near && best.distance < limit
     ? { ...best.entry, distance: best.distance }
     : null;
 }
@@ -457,7 +468,14 @@ export class FaceReader {
       // should not hold up the whole scan. The reading is taken, but it is
       // written down as doubtful so that what depends on it can weigh it
       // less and the review can point at it.
-      if (!believable(rgb)) this.forced.add(i);
+      //
+      // Anything read off the grid, where no sticker was actually seen, is
+      // doubtful too. The usual reason a sticker is not seen is a finger over
+      // it, and skin is the worst colour there is to misread: measured on
+      // photos of the real cube held in a real hand, 11 of 13 skin samples
+      // came out nearest to red. Weighed at a quarter, the other stickers of
+      // its piece outvote it.
+      if (!cell.rgb || !believable(rgb)) this.forced.add(i);
       this.settled[i] = rgb;
       filled++;
     }));

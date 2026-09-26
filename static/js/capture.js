@@ -127,9 +127,23 @@ function srgbToLab([r, g, b]) {
   return [116 * Y - 16, 500 * (X - Y), 200 * (Y - Z)];
 }
 
+// How different two colours are, for telling cube stickers apart.
+//
+// Measured on photos of the real cube: a face turned towards the window comes
+// out washed, its red faded towards pink, and in plain Lab distance that
+// faded red sat nearer an orange than it did to a red. What the light changes
+// is how bright and how strong a colour looks (lightness and chroma); what it
+// barely changes is which colour it is (the hue). So the hue difference counts
+// in full and the other two count for less. The hue term is the standard one
+// that shrinks with chroma, so whites and greys, whose hue means nothing,
+// are not pushed around by it.
 export function labDist(a, b) {
-  // lightness varies a lot with shading, so it weighs less than hue
-  return Math.hypot(0.55 * (a[0] - b[0]), a[1] - b[1], a[2] - b[2]);
+  const c1 = Math.hypot(a[1], a[2]), c2 = Math.hypot(b[1], b[2]);
+  let dh = Math.atan2(a[2], a[1]) - Math.atan2(b[2], b[1]);
+  if (dh > Math.PI) dh -= 2 * Math.PI;
+  if (dh < -Math.PI) dh += 2 * Math.PI;
+  const dH = 2 * Math.sqrt(c1 * c2) * Math.sin(dh / 2);
+  return Math.hypot(0.35 * (a[0] - b[0]), 0.6 * (c1 - c2), dH);
 }
 
 function samplePatch(ctx, x, y, r, w, h) {

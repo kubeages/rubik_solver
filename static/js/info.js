@@ -348,7 +348,9 @@ export function techLines(key, ctx) {
         ["Rejilla", "las direcciones de la cuadrícula salen de los propios parches: histograma de ángulos entre vecinos, y cada parche se proyecta a su fila y columna"],
         ["Resolución", "480 px de ancho para analizar; se prueban 6 segmentaciones por fotograma"],
         ["Lectura", "cada pegatina se fija cuando 3 lecturas coinciden; si una se resiste 7 s, se lee del punto donde la rejilla dice que está"],
-        ["Caras repetidas", "distancia media entre las 9 pegatinas (cromaticidad r/(r+g+b) y brillo relativo), bajo los 4 giros y quitando la peor pegatina; umbral 0,32 medido sobre dos cubos con la luz de 0,6× a 1,3×"],
+        ["Caras repetidas", "distancia media entre las 9 pegatinas en Lab, con el tono pesando entero y la luminosidad y la saturación menos (la luz cambia éstas, no el tono); bajo los 4 giros y quitando la peor. Se decide contra la segunda cara más parecida: una repetida está a menos de 0,62 veces la distancia de la siguiente"],
+        ["Colores", "la misma distancia por tono: en fotos del cubo real, un rojo desvaído por la ventana quedaba más cerca de un naranja que de otro rojo con la distancia Lab normal, y no con ésta"],
+        ["Dedos", "una pegatina que no se ve (casi siempre un dedo encima) y se lee de la rejilla cuenta un cuarto: en fotos reales, 11 de 13 muestras de piel quedaban más cerca del rojo"],
         ["Última comprobación", "al terminar se comparan los 15 pares de caras: una repetida no solo está cerca de su gemela, está 2 veces más cerca que cualquier otro par, y eso no depende de los colores del cubo ni de la luz"],
       ];
     case "review":

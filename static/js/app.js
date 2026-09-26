@@ -568,10 +568,13 @@ async function runValidate() {
       const doubts = app.doubtful ? app.doubtful.size : 0;
       const overruled = app.overruled ? app.overruled.length : 0;
       if (overruled && !app.repairedStickers) {
-        st.textContent = `✓ Es un cubo válido. ${overruled === 1 ? "Una pegatina no cuadraba" :
-          `${overruled} pegatinas no cuadraban`} con ninguna pieza posible y ${overruled === 1 ?
-          "la he corregido" : "las he corregido"} (${overruled === 1 ? "va marcada" : "van marcadas"} ` +
-          `abajo con borde discontinuo): compruébal${overruled === 1 ? "a" : "as"} antes de seguir.`;
+        // Said plainly: the camera misread these and the shape of the cube put
+        // them right. In tests with fingers over eight stickers the result was
+        // perfect every time, so this is a "have a look", not an alarm.
+        st.textContent = `✓ Es un cubo válido. La cámara leyó mal ${overruled === 1 ? "una pegatina" :
+          `${overruled} pegatinas`} (suele ser un dedo o un reflejo) y ${overruled === 1 ? "la he" : "las he"} ` +
+          `corregido con las piezas que tiene que haber en el cubo. ${overruled === 1 ? "Va marcada" : "Van marcadas"} ` +
+          `con borde discontinuo por si quieres echar un vistazo.`;
         $("btn-solve").disabled = false;
         renderBasePicker();
         return;

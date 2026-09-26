@@ -15,7 +15,7 @@ const NS = "http://www.w3.org/2000/svg";
 export const STEPS = [
   {
     face: "F", name: "de delante",
-    how: "Sujeta el cubo de frente a la cámara, sin inclinarlo, y acércalo hasta que la cara llene buena parte de la imagen. Esta será la cara de delante.",
+    how: "Sujeta el cubo de frente a la cámara, sin inclinarlo, y acércalo hasta que la cara llene buena parte de la imagen. Cógelo por arriba y por abajo, o por detrás, con los dedos fuera de la cara que enseñas: un dedo encima de una pegatina se lee como si fuera roja. Esta será la cara de delante.",
   },
   {
     face: "R", name: "de la derecha",
@@ -437,7 +437,12 @@ export class FaceScan {
     const waiting = Date.now() - this._startedAt;
     const left = Math.max(0, Math.ceil((PATIENCE_MS - waiting) / 1000));
     let tail = "";
-    if (read < 9 && waiting > 4000 && read >= 6) tail = " · mueve un poco el cubo para quitar reflejos";
+    // Stuck just short of nine is nearly always something in the way: a finger
+    // over a sticker, or the light bouncing off one. The empty circle on the
+    // picture shows which.
+    if (read < 9 && waiting > 3000 && read >= 6) {
+      tail = " · el círculo vacío está tapado: ¿un dedo o un reflejo? Muévelo un poco";
+    }
     if (read < 9 && left < 8) tail = ` (en ${left} s lo ajustamos a mano)`;
     // While the face in front of the camera is one we already have, that is
     // the only thing worth saying: the reading underneath is going nowhere.
