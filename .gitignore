@@ -14,3 +14,7 @@ claude_resume.sh
 *.local.yaml
 *.local.yml
 capturas/
+
+# macOS copies
+.DS_Store
+._*

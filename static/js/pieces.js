@@ -62,7 +62,8 @@ function piecesOf(centreKeys, model, meta) {
 }
 
 // Places every piece where it costs least, each piece used exactly once.
-export function readPieces(lab, prototypes, centreKeys, model, meta, { cap = 55, unsure = new Set() } = {}) {
+export function readPieces(lab, prototypes, centreKeys, model, meta,
+  { cap = 55, unsure = new Set(), withCost = false } = {}) {
   const { corners, edges } = piecesOf(centreKeys, model, meta);
   // A sticker under a highlight can be any distance from its true colour: a
   // red one with the lamp on it reads almost white. Left alone, that single
@@ -111,7 +112,14 @@ export function readPieces(lab, prototypes, centreKeys, model, meta, { cap = 55,
   };
 
   repairInvariants(state, { corners, edges }, cost, build, model);
-  return build();
+  if (!withCost) return build();
+  // how well this reading explains what the camera measured: the lower, the
+  // better. Used to choose between ways the faces could go together.
+  let total = 0;
+  for (const [group, placed] of [[corners, state.corners], [edges, state.edges]]) {
+    placed.forEach((p, i) => { total += cost(group[i], group[p.piece], p.shift); });
+  }
+  return { colors: build(), cost: total };
 }
 
 // A cube made of the right twenty pieces can still be impossible: a corner

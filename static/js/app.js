@@ -249,30 +249,51 @@ function facesToColors(faces, doubtful = {}) {
   app.rawUnsure = [...unsure];
   const { colors, margin, lab, prototypes } =
     classify(samples, centreIds, lights, new Set([...unsure].map(String)));
-  const centreKeys = centreIds.map((id) => colors[id]);
-  const read = readPieces(lab, prototypes, centreKeys, app.model, app.meta, { unsure });
+  const stickers = Array.from({ length: 54 }, (_, i) => colors[String(i)]);
+
+  // First put the faces the right way round, THEN read the cube by its pieces.
+  // The other order was a bug of mine that cost real scans: tilting the cube
+  // to show the top and the bottom brings those faces in turned, and reading
+  // pieces off a cube assembled with two faces turned "corrects" stickers
+  // into pieces that are not there. On the user's own cube, rebuilt from
+  // their photos, every sticker was read right and the piece step then
+  // spoiled fourteen of them, two on the solid yellow face among them;
+  // straightened first, none.
+  const piecesCost = (order) => {
+    const labHere = Object.fromEntries(order.map((src, pos) => [String(pos), lab[String(src)]]));
+    const where = new Map(order.map((src, pos) => [src, pos]));
+    return readPieces(labHere, prototypes, [0, 1, 2, 3, 4, 5].map((k) => stickers[order[k * 9 + 4]]),
+      app.model, app.meta, { unsure: new Set([...unsure].map((i) => where.get(i))), withCost: true }).cost;
+  };
+  const arrangement = arrangeFaces(stickers, piecesCost);
+  const order = arrangement.order;                 // position -> where it was read
+  const positionOf = new Map(order.map((src, pos) => [src, pos]));
+  const labHere = Object.fromEntries(order.map((src, pos) => [String(pos), lab[String(src)]]));
+  const seen = order.map((src) => stickers[src]);
+  const unsureHere = new Set([...unsure].map((i) => positionOf.get(i)));
+  const centreKeys = [0, 1, 2, 3, 4, 5].map((k) => seen[k * 9 + 4]);
+  app.rearranged = arrangement.how;
+  app.orientedFaces = arrangement.turned;
+  app.ambiguous = arrangement.ambiguous;
+
+  const read = readPieces(labHere, prototypes, centreKeys, app.model, app.meta, { unsure: unsureHere });
   // Where reading by pieces disagrees with reading each sticker on its own,
   // the structure of the cube has overruled the camera. It is usually right,
   // but it is exactly where a mistake would hide, so those stickers are
   // marked for the user to check.
   const overruled = [];
-  for (let i = 0; i < 54; i++) if (read[i] !== colors[String(i)]) overruled.push(i);
-  const oriented = orientFaces(read);
-  if (app.model.isValid(oriented)) {
-    // the marks point at positions, so they only mean anything if the faces
-    // stayed where they were read
-    const moved = oriented.some((c, i) => c !== read[i]);
-    app.overruled = moved ? [] : overruled;
-    app.doubtful = new Set([...app.overruled, ...(moved ? [] : unsure)]);
-    return oriented;
-  }
-  // No way of holding the cube explains these colours, so one of them is
-  // wrong. Red against orange, white against yellow under a warm light: the
-  // doubtful ones are swapped in pairs until the cube makes sense.
+  for (let i = 0; i < 54; i++) if (read[i] !== seen[i]) overruled.push(i);
+  app.overruled = overruled;
+  app.doubtful = new Set([...overruled, ...unsureHere]);
+  if (app.model.isValid(read)) return read;
+
+  // Still impossible, so a colour is wrong. Red against orange, white against
+  // yellow under a warm light: the doubtful ones are swapped in pairs until
+  // the cube makes sense.
   const shaky = Object.keys(margin)
     .sort((a, b) => margin[a] - margin[b])
     .slice(0, 10)
-    .map(Number);
+    .map((id) => positionOf.get(Number(id)));
   for (let i = 0; i < shaky.length; i++) {
     for (let j = i + 1; j < shaky.length; j++) {
       const a = shaky[i], b = shaky[j];
@@ -280,14 +301,13 @@ function facesToColors(faces, doubtful = {}) {
       const candidate = read.slice();
       candidate[a] = read[b];
       candidate[b] = read[a];
-      const fixed = orientFaces(candidate);
-      if (app.model.isValid(fixed)) {
+      if (app.model.isValid(candidate)) {
         app.repairedStickers = 2;
-        return fixed;
+        return candidate;
       }
     }
   }
-  return oriented;
+  return read;
 }
 
 // Turn a face's nine stickers a quarter turn clockwise.
@@ -345,45 +365,57 @@ const HOLDINGS = [
   { how: "girando al revés y con arriba y abajo cambiados", order: [3, 4, 2, 0, 1, 5] },
 ];
 
-function orientFaces(read) {
-  if (app.model.isValid(read)) return read;
-  const scanned = POSITIONS.map((_, k) => read.slice(k * 9, k * 9 + 9));
+// Returns how the scanned faces go together: `order[position]` is the index,
+// as scanned, of the sticker that belongs at that position, plus how the cube
+// was held, how many faces were turned, and whether two cubes fit equally.
+// It works on where stickers go rather than on their colours so that
+// everything measured about them (their colour in Lab, whether they were
+// doubtful) can follow them to their place.
+function arrangeFaces(read, piecesCost) {
+  const identity = Array.from({ length: 54 }, (_, i) => i);
+  const plain = { order: identity, how: null, turned: 0, ambiguous: false, valid: true };
+  if (app.model.isValid(read)) return plain;
+
+  const scanned = POSITIONS.map((_, k) => identity.slice(k * 9, k * 9 + 9));
   const turns = scanned.map((nine) => {
     const list = [nine];
     for (let i = 0; i < 3; i++) list.push(turnFace(list[list.length - 1]));
     return list;
   });
+  const colour = (src) => read[src];
 
   const placed = new Array(6).fill(null);     // position -> turn given to its face
   const ready = new Array(6).fill(false);     // ...which is 0 for an unturned one
-  const board = new Array(54).fill(null);
-  let order = null;
+  const board = new Array(54).fill(null);     // position -> scanned index
+  let faceOrder = null;
 
   const fits = (position) => {
     for (const [facelets, faces] of CORNER_CHECKS) {
       if (!faces.includes(position) || faces.some((f) => !ready[f])) continue;
-      const [a, b, c] = facelets.map((i) => board[i]);
+      const [a, b, c] = facelets.map((i) => colour(board[i]));
       if (a === b || b === c || a === c) return false;
     }
     for (const [facelets, faces] of EDGE_CHECKS) {
       if (!faces.includes(position) || faces.some((f) => !ready[f])) continue;
-      if (board[facelets[0]] === board[facelets[1]]) return false;
+      if (colour(board[facelets[0]]) === colour(board[facelets[1]])) return false;
     }
     return true;
   };
 
   // every turn of every face, in the order this way of holding the cube says
   const found = [];
+  let how = null, rank = 0;
   const search = (position) => {
     if (position === 6) {
-      const candidate = board.slice();
-      if (app.model.isValid(candidate)) {
-        found.push({ colors: candidate, how, turned: placed.filter(Boolean).length, holding: rank });
+      const colours = board.map(colour);
+      if (app.model.isValid(colours)) {
+        found.push({ order: board.slice(), colours: colours.join(""), how,
+          turned: placed.filter(Boolean).length, holding: rank });
       }
       return;
     }
     for (let turn = 0; turn < 4; turn++) {
-      const nine = turns[order[position]][turn];
+      const nine = turns[faceOrder[position]][turn];
       for (let i = 0; i < 9; i++) board[position * 9 + i] = nine[i];
       placed[position] = turn;
       ready[position] = true;
@@ -392,26 +424,74 @@ function orientFaces(read) {
       placed[position] = null;
     }
   };
-
-  let how = null, rank = 0;
   HOLDINGS.forEach((holding, i) => {
-    order = holding.order;
+    faceOrder = holding.order;
     how = holding.how;
     rank = i;
     search(0);
   });
-  if (!found.length) return read;      // nothing fits: it is the colours that are wrong
 
-  // Take the reading that changes the least of what the user was asked to do.
-  // If two different cubes both fit, the faces genuinely do not say which one
-  // is on the table, so the user is told to look at the drawing.
-  found.sort((a, b) => a.holding - b.holding || a.turned - b.turned);
-  const answer = found[0];
-  const distinct = new Set(found.map((f) => f.colors.join(""))).size;
-  app.rearranged = answer.how;
-  app.orientedFaces = answer.turned;
-  app.ambiguous = distinct > 1;
-  return answer.colors;
+  if (found.length) {
+    // Take the reading that changes the least of what the user was asked to
+    // do. If two different cubes both fit, the faces genuinely do not say
+    // which one is on the table, so the user is told to look at the drawing.
+    found.sort((a, b) => a.holding - b.holding || a.turned - b.turned);
+    const best = found[0];
+    return { order: best.order, how: best.how, turned: best.turned,
+      ambiguous: new Set(found.map((f) => f.colours)).size > 1, valid: true };
+  }
+
+  // Nothing fits exactly, because some colours were misread. The faces still
+  // have to be put the right way round before the pieces can correct them.
+  // Counting how many pieces come out as real ones picks the obvious
+  // candidates cheaply, but on its own it was fooled: with fingers over eight
+  // stickers, some wrongly turned arrangement happened to form more real
+  // pieces than the right one. So the few best by that count, and every way
+  // of holding the cube with no face turned, are then judged properly: by how
+  // well the best set of pieces for that arrangement explains the colours
+  // measured, which a handful of bad stickers cannot swing.
+  const candidates = [];
+  HOLDINGS.forEach((holding, rankHere) => {
+    const pieces = realPieces(holding.order.map((k) => read[k * 9 + 4]));
+    for (let code = 0; code < 4096; code++) {
+      const turnsHere = [0, 1, 2, 3, 4, 5].map((k) => (code >> (2 * k)) & 3);
+      const order = [];
+      holding.order.forEach((face, pos) => order.push(...turns[face][turnsHere[pos]]));
+      const colours = order.map(colour);
+      let good = 0;
+      for (const fs of app.meta.corner_facelets) if (pieces.corners.has(fs.map((i) => colours[i]).join(""))) good++;
+      for (const fs of app.meta.edge_facelets) if (pieces.edges.has(fs.map((i) => colours[i]).join(""))) good++;
+      candidates.push({ good, rank: rankHere, turned: turnsHere.filter(Boolean).length, order, how: holding.how });
+    }
+  });
+  candidates.sort((a, b) => b.good - a.good || a.rank - b.rank || a.turned - b.turned);
+  const shortlist = candidates.slice(0, 40).concat(candidates.filter((c) => c.turned === 0));
+  let best = null;
+  for (const c of shortlist) {
+    // a little in favour of doing what was asked, so a tie goes to that
+    const score = piecesCost(c.order) + 4 * c.turned + 8 * c.rank;
+    if (!best || score < best.score) best = { ...c, score };
+  }
+  return { order: best.order, how: best.how, turned: best.turned, ambiguous: false, valid: false };
+}
+
+// The corners and edges a cube with these six centre colours has, written as
+// their colours read round each corner (in all three starting places) and
+// along each edge (both ways), for looking up.
+function realPieces(centres) {
+  const solved = app.meta.solved;
+  const keyOf = (letter) => centres[app.model.faces.indexOf(letter)];
+  const corners = new Set(), edges = new Set();
+  for (const fs of app.meta.corner_facelets) {
+    const c = fs.map((i) => keyOf(solved[i]));
+    for (let s = 0; s < 3; s++) corners.add([c[s], c[(s + 1) % 3], c[(s + 2) % 3]].join(""));
+  }
+  for (const fs of app.meta.edge_facelets) {
+    const e = fs.map((i) => keyOf(solved[i]));
+    edges.add(e.join(""));
+    edges.add([e[1], e[0]].join(""));
+  }
+  return { corners, edges };
 }
 
 function updateFacePreview(faces, step, current) {
@@ -593,8 +673,8 @@ async function runValidate() {
         }
         if (app.rearranged) parts.push(`parece que lo escaneaste ${app.rearranged}`);
         st.textContent = `✓ Es un cubo válido. Lo he corregido solo: ${parts.join(" y ")}.` +
-          (app.ambiguous ? " Ojo: estas seis caras encajan de más de una manera, así que compruebá" +
-           "ndolo en el dibujo de abajo antes de seguir." : "");
+          (app.ambiguous ? " Ojo: estas seis caras encajan de más de una manera, así que compruébalo " +
+           "en el dibujo de abajo antes de seguir." : "");
         $("btn-solve").disabled = false;
         renderBasePicker();
         return;
