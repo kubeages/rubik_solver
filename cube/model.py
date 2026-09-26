@@ -215,16 +215,25 @@ EDGE_COLORS = [[SOLVED[i] for i in fs] for fs in EDGE_FACELETS]
 
 
 class InvalidCube(ValueError):
-    """Raised with a user-facing (Spanish) message when a cube cannot exist.
+    """Raised when a cube cannot exist.
 
-    When one piece is to blame, `piece` names it ({"kind": "corner"|"edge",
-    "name": "URF"}), so the browser can point at its stickers without having
-    to read them back out of the Spanish sentence.
+    It carries a message key and its values rather than a sentence, so the
+    reason can be told in the user's language (see cube/i18n.py); str() gives
+    it in Spanish, for logs and tests. When one piece is to blame, `blame`
+    names it ({"kind": "corner"|"edge", "name": "URF"}), kept as `.piece`, so
+    the browser can point at its stickers.
     """
 
-    def __init__(self, message: str, piece: dict | None = None):
-        super().__init__(message)
-        self.piece = piece
+    def __init__(self, key: str, blame: dict | None = None, **params):
+        from .i18n import tr
+        self.key = key
+        self.params = params
+        self.piece = blame
+        super().__init__(tr("es", key, **params))
+
+    def message(self, lang: str) -> str:
+        from .i18n import tr
+        return tr(lang, self.key, **self.params)
 
 
 @dataclass
@@ -287,21 +296,19 @@ class CubieCube:
             cols = [s[j] for j in CORNER_FACELETS[i]]
             ori = next((k for k in range(3) if cols[k] in "UD"), None)
             if ori is None:
-                raise InvalidCube(f"La esquina {CORNER_NAMES[i]} no tiene color de arriba ni de abajo",
-                                  {"kind": "corner", "name": CORNER_NAMES[i]})
+                raise InvalidCube("cube.corner_no_ud", {"kind": "corner", "name": CORNER_NAMES[i]},
+                                  piece=CORNER_NAMES[i])
             c1, c2 = cols[(ori + 1) % 3], cols[(ori + 2) % 3]
             for j in range(8):
                 if set(CORNER_COLORS[j]) == set(cols):
                     if (CORNER_COLORS[j][1], CORNER_COLORS[j][2]) != (c1, c2):
-                        raise InvalidCube(
-                            f"La esquina {CORNER_NAMES[i]} tiene sus colores en un orden imposible: "
-                            "revisa esas tres pegatinas",
-                            {"kind": "corner", "name": CORNER_NAMES[i]})
+                        raise InvalidCube("cube.corner_order", {"kind": "corner", "name": CORNER_NAMES[i]},
+                                          piece=CORNER_NAMES[i])
                     cp[i], co[i] = j, ori
                     break
             else:
-                raise InvalidCube(f"La esquina {CORNER_NAMES[i]} tiene una combinación de colores imposible",
-                                  {"kind": "corner", "name": CORNER_NAMES[i]})
+                raise InvalidCube("cube.corner_combo", {"kind": "corner", "name": CORNER_NAMES[i]},
+                                  piece=CORNER_NAMES[i])
         for i in range(12):
             cols = [s[j] for j in EDGE_FACELETS[i]]
             for j in range(12):
@@ -312,8 +319,8 @@ class CubieCube:
                     ep[i], eo[i] = j, 1
                     break
             else:
-                raise InvalidCube(f"La arista {EDGE_NAMES[i]} tiene una combinación de colores imposible",
-                                  {"kind": "edge", "name": EDGE_NAMES[i]})
+                raise InvalidCube("cube.edge_combo", {"kind": "edge", "name": EDGE_NAMES[i]},
+                                  piece=EDGE_NAMES[i])
         return cls(cp, co, ep, eo)
 
     def corner_parity(self) -> int:
@@ -342,25 +349,25 @@ CUBIE_MOVES: dict[str, CubieCube] = {m: _cubie_from_move(m) for m in MOVES}
 def validate(facelets: str) -> CubieCube:
     """Check that a facelet string is a reachable cube; raise InvalidCube otherwise."""
     if len(facelets) != 54 or any(ch not in FACES for ch in facelets):
-        raise InvalidCube("El estado debe tener 54 pegatinas con letras URFDLB")
+        raise InvalidCube("cube.bad_length")
     for k, f in enumerate(FACES):
         if facelets[9 * k + 4] != f:
-            raise InvalidCube("Los centros no coinciden con sus caras")
+            raise InvalidCube("cube.centres")
     for f in FACES:
         n = facelets.count(f)
         if n != 9:
-            raise InvalidCube(f"Hay {n} pegatinas del color de la cara {f}; deben ser 9")
+            raise InvalidCube("cube.count", n=n, face=f)
     cc = CubieCube.from_facelets(facelets)
     if sorted(cc.cp) != list(range(8)):
-        raise InvalidCube("Hay esquinas repetidas: revisa los colores de las esquinas")
+        raise InvalidCube("cube.corners_repeated")
     if sorted(cc.ep) != list(range(12)):
-        raise InvalidCube("Hay aristas repetidas: revisa los colores de las aristas")
+        raise InvalidCube("cube.edges_repeated")
     if sum(cc.co) % 3:
-        raise InvalidCube("Una esquina está girada sobre sí misma (el cubo se desmontó o hay un color mal leído)")
+        raise InvalidCube("cube.corner_twisted")
     if sum(cc.eo) % 2:
-        raise InvalidCube("Una arista está volteada (el cubo se desmontó o hay un color mal leído)")
+        raise InvalidCube("cube.edge_flipped")
     if cc.corner_parity() != cc.edge_parity():
-        raise InvalidCube("Hay dos piezas intercambiadas: este estado no se puede alcanzar girando caras")
+        raise InvalidCube("cube.swapped")
     return cc
 
 

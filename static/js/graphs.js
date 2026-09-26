@@ -1,6 +1,8 @@
 // SVG graph views: the sticker graph (54 facelets + face-turn rings), the
 // neighbourhood of the current vertex, the BFS layers of the stage graph
 // and the path followed so far.
+import { t as tr, lang } from "./i18n.js";
+import { macroName, macroShort } from "./names.js";
 import { COLORS } from "./cubemodel.js";
 
 const NS = "http://www.w3.org/2000/svg";
@@ -244,9 +246,9 @@ export function drawNeighbors(svg, step, { mode }) {
       x: lx, y: ly + 3.5, "text-anchor": "middle", "font-size": n > 12 ? 9 : 9.5,
       "font-weight": chosen ? 700 : 500, fill: chosen ? accent : css("--ink-2"), class: "mono",
     }, nodes);
-    lab.textContent = nb.short || nb.label;
+    lab.textContent = macroShort(nb);
     const title = el("title", {}, lab);
-    title.textContent = `${nb.label}${nb.alg !== nb.label ? " · " + nb.alg : ""}`;
+    title.textContent = `${macroName(nb)}${nb.alg !== nb.label ? " · " + nb.alg : ""}`;
   });
   el("circle", { cx: 0, cy: 0, r: 17, fill: accent }, nodes);
   const c = el("text", { x: 0, y: 5, "text-anchor": "middle", "font-size": 14, "font-weight": 700, fill: "#fff" }, nodes);
@@ -257,7 +259,7 @@ export function drawNeighbors(svg, step, { mode }) {
 // Layers of the stage graph (BFS levels, log scale)
 // ---------------------------------------------------------------------------
 
-export function drawLevels(svg, histogram, current, { label = "distancia a la meta" } = {}) {
+export function drawLevels(svg, histogram, current, { label = tr("graph.distance") } = {}) {
   svg.innerHTML = "";
   if (!histogram || !histogram.length) return;
   const W = 320, H = 170, left = 34, bottom = 28, top = 18, right = 8;
@@ -281,14 +283,14 @@ export function drawLevels(svg, histogram, current, { label = "distancia a la me
       fill: isCur ? accent : muted, opacity: isCur ? 1 : 0.8,
     }, svg);
     const tt = el("title", {}, r);
-    tt.textContent = `${v.toLocaleString("es")} vértices a distancia ${d}`;
+    tt.textContent = tr("graph.levels_tip", { count: v.toLocaleString(lang()), d });
     if (n <= 22 || d % 2 === 0) {
       const t = el("text", { x: x + (bw - 3) / 2, y: H - bottom + 11, "text-anchor": "middle", "font-size": 8.5, fill: ink2 }, svg);
       t.textContent = d;
     }
     if (isCur) {
       const t = el("text", { x: x + (bw - 3) / 2, y: H - bottom - h - 5, "text-anchor": "middle", "font-size": 9, "font-weight": 700, fill: accent }, svg);
-      t.textContent = "tú";
+      t.textContent = tr("graph.you");
     }
   });
   const t = el("text", { x: (W + left) / 2, y: H - 3, "text-anchor": "middle", "font-size": 9, fill: ink2 }, svg);
@@ -328,7 +330,7 @@ export function drawPath(svg, series, current, { bounds = null, separators = [] 
   el("polyline", { points: done, fill: "none", stroke: accent, "stroke-width": 2.2 }, svg);
   el("circle", { cx: X(current), cy: Y(series[current]), r: 4.5, fill: accent, stroke: css("--surface"), "stroke-width": 1.5 }, svg);
   const t = el("text", { x: (W + left) / 2, y: H - 4, "text-anchor": "middle", "font-size": 9, fill: ink3 }, svg);
-  t.textContent = "pasos →";
+  t.textContent = tr("graph.steps_axis");
 }
 
 // Small isometric sketch used on the capture screen to show which faces must be visible.
@@ -338,7 +340,7 @@ export function drawCaptureGuide(svg, view, faceColors) {
     C: [0, 0], T: [0, -50], UR: [43.3, -25], LR: [43.3, 25], B: [0, 50], LL: [-43.3, 25], UL: [-43.3, -25],
   };
   const faces = [["C", "UL", "T", "UR"], ["C", "UL", "LL", "B"], ["C", "UR", "LR", "B"]];
-  const labels = view === 0 ? ["arriba", "delante", "derecha"] : ["antes abajo", "antes izquierda", "antes detrás"];
+  const labels = tr(view === 0 ? "graph.view1" : "graph.view2").split("|");
   faces.forEach((q, i) => {
     el("polygon", {
       points: q.map((k) => pts[k].join(",")).join(" "),

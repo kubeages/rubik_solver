@@ -1,0 +1,37 @@
+{# The language switch: a flag and a three-letter code for each language.
+   Flags are drawn here rather than taken from emoji, which Windows shows as
+   two plain letters instead of a flag. #}
+{% macro flag(code) -%}
+  {%- if code == "es" -%}
+  <svg class="flag" viewBox="0 0 30 20" aria-hidden="true"><rect width="30" height="20" fill="#AA151B"/><rect y="5" width="30" height="10" fill="#F1BF00"/></svg>
+  {%- else -%}
+  <svg class="flag" viewBox="0 0 60 30" aria-hidden="true"><clipPath id="uk-clip"><path d="M30,15h30v15zv15h-30zh-30v-15zv-15h30z"/></clipPath><rect width="60" height="30" fill="#012169"/><path d="M0,0L60,30M60,0L0,30" stroke="#fff" stroke-width="6"/><path d="M0,0L60,30M60,0L0,30" clip-path="url(#uk-clip)" stroke="#C8102E" stroke-width="4"/><path d="M30,0v30M0,15h60" stroke="#fff" stroke-width="10"/><path d="M30,0v30M0,15h60" stroke="#C8102E" stroke-width="6"/></svg>
+  {%- endif -%}
+{%- endmacro %}
+
+{% set LANG_LABEL = {"es": "ESP", "en": "ENG"} %}
+{% set LANG_NAME = {"es": "Español", "en": "English"} %}
+
+{# In the app: buttons, switched by JavaScript without reloading. #}
+{% macro switch(current) -%}
+  <div class="lang-switch" role="group" aria-label="Idioma / Language">
+    {%- for code in ["es", "en"] %}
+    <button type="button" class="lang-btn" data-lang="{{ code }}" lang="{{ code }}"
+            aria-pressed="{{ 'true' if code == current else 'false' }}" title="{{ LANG_NAME[code] }}">
+      {{ flag(code) }}<span>{{ LANG_LABEL[code] }}</span>
+    </button>
+    {%- endfor %}
+  </div>
+{%- endmacro %}
+
+{# On the login page: plain links, so it works before any script has run. #}
+{% macro links(current, next) -%}
+  <div class="lang-switch" role="group" aria-label="Idioma / Language">
+    {%- for code in ["es", "en"] %}
+    <a class="lang-btn" href="?lang={{ code }}&amp;next={{ next|urlencode }}" lang="{{ code }}"
+       aria-current="{{ 'true' if code == current else 'false' }}" title="{{ LANG_NAME[code] }}">
+      {{ flag(code) }}<span>{{ LANG_LABEL[code] }}</span>
+    </a>
+    {%- endfor %}
+  </div>
+{%- endmacro %}

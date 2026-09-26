@@ -10,6 +10,8 @@
 
 const HANDLE_ANGLE = { T: -90, UR: -30, LR: 30, B: 90, LL: 150, UL: 210 };
 
+import { t } from "./i18n.js";
+
 export function poseHandles(cx, cy, r, theta) {
   const out = { C: [cx, cy] };
   for (const [k, a] of Object.entries(HANDLE_ANGLE)) {
@@ -1146,9 +1148,8 @@ export class Tracker {
     }
     this.lastFit = fit;
     if (!fit || fit.score < 0.3) {
-      return { blobs: blobs.length, fit: null, read: this.read, message: blobs.length < 8
-        ? "Enfoca el cubo: acércalo o busca más luz"
-        : "Buscando el cubo…" };
+      return { blobs: blobs.length, fit: null, read: this.read,
+        message: t(blobs.length < 8 ? "track.focus" : "track.searching") };
     }
     // Turning the cube a little is good: more angles, more stickers read. But
     // turning it a third of a turn about the corner swaps which face is which,
@@ -1177,7 +1178,7 @@ export class Tracker {
       this.stuck = this.stuck + 1;
       return {
         blobs: blobs.length, fit, read: this.read, centers, stuck: this.stuck, weak: true,
-        message: `La cuadrícula no acaba de encajar · gira el cubo despacio o pulsa «Ajustar a mano»`,
+        message: t("track.poor"),
       };
     }
     for (const c of centers) {
@@ -1227,7 +1228,7 @@ export class Tracker {
     return {
       blobs: blobs.length, fit, read, centers, stuck: this.stuck,
       message: read === 27
-        ? (this.done ? "¡Las 27 leídas!" : "27 leídas · comprobando que la cuadrícula encaja")
+        ? t(this.done ? "track.all" : "track.checking")
         : this.advice(read),
     };
   }
@@ -1236,11 +1237,10 @@ export class Tracker {
   advice(read) {
     const p = this.faceProgress();
     const worst = Object.entries(p).sort((a, b) => a[1] - b[1])[0];
-    const names = { top: "de arriba", left: "de delante", right: "de la derecha" };
     if (worst[1] < 9) {
-      return `Leídas ${read} de 27 · gira despacio para que se vea mejor la cara ${names[worst[0]]} (${worst[1]} de 9)`;
+      return t("track.worst", { n: read, face: t(`track.face.${worst[0]}`), k: worst[1] });
     }
-    return `Leídas ${read} de 27 · gira el cubo muy poco a poco`;
+    return t("track.slowly", { n: read });
   }
 
   colors() {

@@ -8,6 +8,7 @@
 // place each patch in its row and column. No camera, no perspective fitting.
 
 import { segmentHoles, segmentBlobs, smooth, diffuseColor } from "./detect.js";
+import { t } from "./i18n.js";
 
 // Patches that belong to one flat 3x3 grid, arranged in rows and columns.
 export function detectFace(data, w, h) {
@@ -412,7 +413,7 @@ export class FaceReader {
     const grid = detectFace(data, w, h);
     this.lastGrid = grid;
     if (!grid || grid.found < 5) {
-      return { grid, read: this.read, message: "Enseña una cara entera, de frente y llenando el recuadro" };
+      return { grid, read: this.read, message: t("read.show_face") };
     }
     const believable = plausible(grid);
     grid.cells.forEach((row, r) => row.forEach((cell, c) => {
@@ -427,7 +428,7 @@ export class FaceReader {
     const read = this.read;
     return {
       grid, read,
-      message: read === 9 ? "Cara leída" : `Leídas ${read} de 9 · mantén la cara de frente`,
+      message: read === 9 ? t("read.done") : t("read.progress", { n: read }),
     };
   }
 

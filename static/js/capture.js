@@ -9,6 +9,7 @@
 
 import { COLORS, COLOR_KEYS } from "./cubemodel.js";
 import { Tracker } from "./detect.js";
+import { t, lang } from "./i18n.js";
 
 const NS = "http://www.w3.org/2000/svg";
 const HANDLE_VEC = {
@@ -470,12 +471,16 @@ export class Capture {
     else this._idleUpload();
   }
 
+  // After a change of language.
+  retext() {
+    this._updateTexts();
+    if (this._buttons) this._showButtons(this._buttons);
+  }
+
   _updateTexts() {
     const e = this.els;
-    e.title.textContent = `Foto ${this.view + 1} de 2`;
-    e.instructions.textContent = this.view === 0
-      ? "Sujeta el cubo con una esquina apuntando a la cámara, de forma que se vean las caras de arriba, delante y derecha. No hace falta encajarlo en ningún sitio: muévelo despacio hasta que se lean las 27 pegatinas."
-      : "Ahora dale la vuelta: que apunte a la cámara la esquina opuesta (la que estaba abajo, detrás, a la izquierda). Deben verse las tres caras que faltaban.";
+    e.title.textContent = t("photo.title", { i: this.view + 1 });
+    e.instructions.textContent = t(this.view === 0 ? "photo.how.1" : "photo.how.2");
     this.els.onGuide && this.els.onGuide(this.view);
   }
 
@@ -484,7 +489,7 @@ export class Capture {
     this.els.canvas.style.display = "none";
     this.els.video.style.display = "block";
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      this._cameraError("Este navegador no permite usar la cámara aquí (hace falta HTTPS). Sube una foto en su lugar.");
+      this._cameraError(t("photo.no_camera_api"));
       return;
     }
     try {
@@ -501,12 +506,10 @@ export class Capture {
       this.size = [w, h];
       this.handles = this._defaultHandles(w, h);
       this._renderOverlay({ interactive: false });
-      this.els.hint.textContent = this.auto
-        ? "Enséñale el cubo a la cámara: lo busca solo y dispara cuando haya leído las 27 pegatinas."
-        : "Enséñale el cubo a la cámara y pulsa Capturar ahora cuando quieras.";
+      this.els.hint.textContent = t(this.auto ? "photo.hint.auto" : "photo.hint.manual");
       this._startLiveCheck();
     } catch (err) {
-      this._cameraError("No se pudo abrir la cámara: " + (err.message || err) + ". Puedes subir una foto.");
+      this._cameraError(t("photo.camera_failed", { error: err.message || err }));
     }
   }
 
@@ -633,12 +636,8 @@ export class Capture {
     }
     const read = this.tracker ? this.tracker.read : 0;
     this.els.hint.textContent = (onRequest
-      ? "Coloca la cuadrícula tú mismo: "
-      : read
-        ? `He leído ${read} de 27 pegatinas, pero la cuadrícula no acaba de encajar. `
-        : "No consigo encontrar el cubo solo en esta escena. ") +
-      "arrastra los 7 puntos azules hasta las esquinas del cubo (el del centro, a la esquina que " +
-      "apunta hacia ti). Los círculos muestran el color que lee cada pegatina.";
+      ? t("photo.place.asked")
+      : read ? t("photo.place.partial", { n: read }) : t("photo.place.none")) + t("photo.place.drag");
   }
 
   _showQuality(res, countdown = null) {
@@ -651,16 +650,16 @@ export class Capture {
     let msg = res.message;
     if (!res.fit && this._searching > 12) {
       const left = Math.ceil((SEARCH_FRAMES - this._searching) / 6);
-      msg = `Buscando el cubo… acércalo a la cámara (en ${left} s lo ajustamos a mano)`;
+      msg = t("photo.q.searching", { s: left });
     } else if (this._poor > 30) {
       const left = Math.ceil((POOR_FRAMES - this._poor) / 6);
-      msg = `La cuadrícula no encaja · gira el cubo (en ${left} s lo ajustamos a mano)`;
+      msg = t("photo.q.poor", { s: left });
     } else if (read < 27 && (res.stuck || 0) > NO_PROGRESS_FRAMES - 36) {
       const left = Math.ceil((NO_PROGRESS_FRAMES - res.stuck) / 6);
-      msg = `${res.message} (en ${left} s lo ajustamos a mano)`;
+      msg = t("photo.q.stuck", { message: res.message, s: left });
     }
     if (read >= 20 && read < 27 && countdown !== null && countdown <= 12) {
-      msg = `Leídas ${read} de 27 · si no avanza, capturo con lo que hay`;
+      msg = t("photo.q.almost", { n: read });
     }
     box.innerHTML =
       `<span class="quality-bar"><i style="width:${Math.round((read / 27) * 100)}%"></i></span>` +
@@ -682,9 +681,8 @@ export class Capture {
     a.click();
     const read = this.tracker ? this.tracker.read : 0;
     const fit = this.tracker && this.tracker.lastFit;
-    this.els.hint.textContent =
-      `Foto guardada en tus descargas (leídas ${read} de 27` +
-      (fit ? `, ajuste ${fit.score.toFixed(2)}` : ", sin cubo detectado") + ").";
+    this.els.hint.textContent = t("photo.saved", { n: read,
+      fit: fit ? t("photo.saved_fit", { score: fit.score.toFixed(2) }) : t("photo.saved_nofit") });
   }
 
   _flash() {
@@ -703,6 +701,11 @@ export class Capture {
 
   _showButtons(state) {
     const e = this.els;
+    // the face-by-face scanner shares these buttons and gives them its own words
+    e.shoot.textContent = t("capture.shoot");
+    e.retake.textContent = t("capture.retake");
+    e.use.textContent = t("capture.use");
+    this._buttons = state;
     e.shoot.hidden = state !== "camera";
     if (e.diag) e.diag.hidden = state !== "camera";
     if (e.manual) e.manual.hidden = state !== "camera";
@@ -766,10 +769,9 @@ export class Capture {
         this.samples = { ...this.samples, ...found.colors };
         this._renderOverlay({ interactive: true });
         this.els.hint.textContent = found.read === 27
-          ? "Cubo encontrado y leídas las 27 pegatinas. Si alguna no cuadra, arrastra los puntos."
-          : `Cubo encontrado (${found.read} de 27 pegatinas leídas). Ajusta los puntos si hace falta.`;
+          ? t("photo.found_all") : t("photo.found_some", { n: found.read });
       } else {
-        this.els.hint.textContent = "No he encontrado el cubo en la foto: arrastra los 7 puntos hasta sus esquinas.";
+        this.els.hint.textContent = t("photo.not_found");
       }
     };
     img.src = URL.createObjectURL(file);
@@ -808,7 +810,7 @@ export class Capture {
     this.els.canvas.style.display = "block";
     this.handles = handles ? JSON.parse(JSON.stringify(handles)) : this._defaultHandles(w, h);
     this._showButtons("adjust");
-    this.els.hint.textContent = "Arrastra los 7 puntos azules hasta las esquinas del cubo si no encajan. Los círculos muestran el color leído.";
+    this.els.hint.textContent = t("photo.adjust");
     this._sample();
     this._renderOverlay({ interactive: true });
   }

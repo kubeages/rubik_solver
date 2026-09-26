@@ -1,10 +1,10 @@
-<!DOCTYPE html>
-<html lang="es">
+{% import "_lang.html" as l %}<!DOCTYPE html>
+<html lang="{{ lang }}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Rubik con grafos</title>
-  <meta name="description" content="Resuelve tu cubo de Rubik paso a paso y aprende la teoría de grafos que hay detrás.">
+  <title data-i18n="page.title">{{ t("page.title") }}</title>
+  <meta name="description" data-i18n-attr="content:page.description" content="{{ t('page.description') }}">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'><rect x='1' y='1' width='8.5' height='8.5' rx='2' fill='%23c8252c'/><rect x='10.75' y='1' width='8.5' height='8.5' rx='2' fill='%23f7c928'/><rect x='20.5' y='1' width='8.5' height='8.5' rx='2' fill='%231f8a4c'/><rect x='1' y='10.75' width='8.5' height='8.5' rx='2' fill='%231f5fbf'/><rect x='10.75' y='10.75' width='8.5' height='8.5' rx='2' fill='%23f2f2ec'/><rect x='20.5' y='10.75' width='8.5' height='8.5' rx='2' fill='%23f2842a'/><rect x='1' y='20.5' width='8.5' height='8.5' rx='2' fill='%23f7c928'/><rect x='10.75' y='20.5' width='8.5' height='8.5' rx='2' fill='%231f8a4c'/><rect x='20.5' y='20.5' width='8.5' height='8.5' rx='2' fill='%23c8252c'/></svg>">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
   <script type="importmap">
@@ -16,16 +16,17 @@
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="/" aria-label="Inicio">
+  <a class="brand" href="/" data-i18n-attr="aria-label:brand.home" aria-label="{{ t('brand.home') }}">
     <span class="brand-mark" aria-hidden="true"></span>
-    <span>Rubik <em>con grafos</em></span>
+    <span>Rubik <em data-i18n="brand.suffix">{{ t("brand.suffix") }}</em></span>
   </a>
-  {% if auth_enabled %}<a class="logout" href="/logout" title="Cerrar sesión">{% if auth_user %}<b>{{ auth_user }}</b> · {% endif %}Salir</a>{% endif %}
-  <nav class="steps-nav" aria-label="Progreso">
-    <span data-screen-link="home" class="active">1 · Empezar</span>
-    <span data-screen-link="capture">2 · Escanear</span>
-    <span data-screen-link="review">3 · Revisar</span>
-    <span data-screen-link="solve">4 · Resolver</span>
+  {{ l.switch(lang) }}
+  {% if auth_enabled %}<a class="logout" href="/logout" data-i18n-attr="title:logout.title" title="{{ t('logout.title') }}">{% if auth_user %}<b>{{ auth_user }}</b> · {% endif %}<span data-i18n="logout.label">{{ t("logout.label") }}</span></a>{% endif %}
+  <nav class="steps-nav" data-i18n-attr="aria-label:nav.label" aria-label="{{ t('nav.label') }}">
+    <span data-screen-link="home" class="active" data-i18n="nav.home">{{ t("nav.home") }}</span>
+    <span data-screen-link="capture" data-i18n="nav.capture">{{ t("nav.capture") }}</span>
+    <span data-screen-link="review" data-i18n="nav.review">{{ t("nav.review") }}</span>
+    <span data-screen-link="solve" data-i18n="nav.solve">{{ t("nav.solve") }}</span>
   </nav>
 </header>
 
@@ -34,37 +35,32 @@
   <section class="screen active" id="screen-home">
     <div class="hero">
       <div class="hero-text">
-        <h1>Resuelve tu cubo siguiendo un camino en un grafo</h1>
-        <p>Cada posición del cubo es un vértice y cada giro es una arista. Resolverlo es encontrar
-          un camino hasta el vértice «resuelto». Te guiamos paso a paso: tú haces el giro, lo
-          confirmas, y te enseñamos qué está pasando en el grafo.</p>
+        <h1 data-i18n="home.title">{{ t("home.title") }}</h1>
+        <p data-i18n="home.intro">{{ t("home.intro") }}</p>
         <div class="hero-actions">
-          <button class="btn primary" data-action="scan-camera">📷 Escanear con la cámara</button>
-          <button class="btn" data-action="scan-upload">🖼️ Subir fotos</button>
-          <button class="btn ghost" data-action="manual">✏️ Pintar a mano</button>
-          <button class="btn ghost" data-action="demo">🎲 Probar con un cubo mezclado</button>
+          <button class="btn primary" data-action="scan-camera" data-i18n="home.scan_camera">{{ t("home.scan_camera") }}</button>
+          <button class="btn" data-action="scan-upload" data-i18n="home.scan_upload">{{ t("home.scan_upload") }}</button>
+          <button class="btn ghost" data-action="manual" data-i18n="home.manual">{{ t("home.manual") }}</button>
+          <button class="btn ghost" data-action="demo" data-i18n="home.demo">{{ t("home.demo") }}</button>
         </div>
-        <p class="hint">Con dos fotos basta: cada una muestra tres caras del cubo, apuntando una esquina hacia la cámara.</p>
+        <p class="hint" data-i18n="home.hint">{{ t("home.hint") }}</p>
       </div>
       <div class="hero-graph">
-        <svg id="hero-sticker-graph" viewBox="-100 -100 200 200" role="img" aria-label="Grafo de pegatinas del cubo"></svg>
+        <svg id="hero-sticker-graph" viewBox="-100 -100 200 200" role="img" data-i18n-attr="aria-label:home.graph_label" aria-label="{{ t('home.graph_label') }}"></svg>
       </div>
     </div>
     <div class="explainer">
       <article>
-        <h3>El grafo de pegatinas</h3>
-        <p>Los 54 adhesivos son vértices. Cada giro de cara los mueve por un anillo de 12 adhesivos
-          y rota los 8 de la propia cara: son los ciclos de una permutación.</p>
+        <h3 data-i18n="home.e1.title">{{ t("home.e1.title") }}</h3>
+        <p data-i18n="home.e1.body">{{ t("home.e1.body") }}</p>
       </article>
       <article>
-        <h3>El grafo de estados</h3>
-        <p>Unos 43 trillones de vértices, 18 aristas por vértice y diámetro 20 (el «número de Dios»).
-          Demasiado grande para recorrerlo entero, así que lo partimos en fases.</p>
+        <h3 data-i18n="home.e2.title">{{ t("home.e2.title") }}</h3>
+        <p data-i18n="home.e2.body">{{ t("home.e2.body") }}</p>
       </article>
       <article>
-        <h3>Búsqueda de caminos</h3>
-        <p>En cada fase usamos BFS para conocer la distancia exacta a la meta, o IDA* con cotas
-          inferiores en el modo rápido. Cada paso que confirmas es una arista que te acerca.</p>
+        <h3 data-i18n="home.e3.title">{{ t("home.e3.title") }}</h3>
+        <p data-i18n="home.e3.body">{{ t("home.e3.body") }}</p>
       </article>
     </div>
   </section>
@@ -74,7 +70,7 @@
     <div class="capture-layout">
       <div class="capture-stage">
         <div class="capture-head">
-          <h2 id="capture-title">Foto 1 de 2</h2>
+          <h2 id="capture-title">{{ t("capture.title_default") }}</h2>
           <p id="capture-instructions"></p>
         </div>
         <div class="capture-canvas-wrap" id="capture-wrap">
@@ -84,52 +80,49 @@
           <div class="quality" id="capture-quality" hidden></div>
         </div>
         <div class="capture-actions">
-          <button class="btn primary" id="btn-shoot">Capturar ahora</button>
+          <button class="btn primary" id="btn-shoot">{{ t("capture.shoot") }}</button>
           <label class="auto-toggle" id="auto-toggle-label">
-            <input type="checkbox" id="auto-toggle" checked> Captura automática
+            <input type="checkbox" id="auto-toggle" checked> <span data-i18n="capture.auto">{{ t("capture.auto") }}</span>
           </label>
-          <label class="btn" id="btn-upload-label">Subir foto<input type="file" id="file-input" accept="image/*" hidden></label>
-          <button class="btn ghost" id="btn-retake" hidden>Repetir</button>
-          <button class="btn primary" id="btn-use" hidden>Usar esta foto ›</button>
-          <button class="btn ghost" id="btn-capture-cancel">Cancelar</button>
-          <button class="btn" id="btn-manual" title="Congela la imagen y coloca tú la cuadrícula">✋ Ajustar a mano</button>
-          <button class="btn ghost" id="btn-diag" title="Guarda el fotograma actual para poder revisarlo">Guardar foto</button>
+          <label class="btn" id="btn-upload-label"><span data-i18n="capture.upload">{{ t("capture.upload") }}</span><input type="file" id="file-input" accept="image/*" hidden></label>
+          <button class="btn ghost" id="btn-retake" hidden>{{ t("capture.retake") }}</button>
+          <button class="btn primary" id="btn-use" hidden>{{ t("capture.use") }}</button>
+          <button class="btn ghost" id="btn-capture-cancel" data-i18n="capture.cancel">{{ t("capture.cancel") }}</button>
+          <button class="btn" id="btn-manual" data-i18n-attr="title:capture.manual_title" title="{{ t('capture.manual_title') }}" data-i18n="capture.manual">{{ t("capture.manual") }}</button>
+          <button class="btn ghost" id="btn-diag" data-i18n-attr="title:capture.diag_title" title="{{ t('capture.diag_title') }}" data-i18n="capture.diag">{{ t("capture.diag") }}</button>
         </div>
-        <p class="hint" id="capture-hint">Enséñale el cubo a la cámara: lo busca solo y dispara cuando haya leído las 27 pegatinas.</p>
+        <p class="hint" id="capture-hint">{{ t("capture.hint_default") }}</p>
       </div>
       <aside class="capture-guide">
-        <h3>Lo que llevo leído <span class="read-count" id="preview-count">0 de 27</span></h3>
+        <h3><span data-i18n="capture.read_so_far">{{ t("capture.read_so_far") }}</span> <span class="read-count" id="preview-count"></span></h3>
         <div id="capture-preview" class="capture-preview"></div>
         <div class="face-progress" id="face-progress">
-          <span data-face="top">Arriba <b>0/9</b></span>
-          <span data-face="left">Delante <b>0/9</b></span>
-          <span data-face="right">Derecha <b>0/9</b></span>
+          <span data-face="top">{{ t("capture.face.top") }} <b>0/9</b></span>
+          <span data-face="left">{{ t("capture.face.front") }} <b>0/9</b></span>
+          <span data-face="right">{{ t("capture.face.right") }} <b>0/9</b></span>
           <span data-face="f4" hidden>— <b>0/9</b></span>
           <span data-face="f5" hidden>— <b>0/9</b></span>
           <span data-face="f6" hidden>— <b>0/9</b></span>
         </div>
-        <p class="hint" id="preview-hint">Las caras que aún no ha leído salen en gris.</p>
+        <p class="hint" id="preview-hint">{{ t("capture.preview_hint_faces") }}</p>
         <div id="guide-faces">
-          <h3>Cómo girar el cubo</h3>
+          <h3 data-i18n="capture.guide_faces.title">{{ t("capture.guide_faces.title") }}</h3>
           <ol class="guide-list">
-            <li>Enseña una cara <b>de frente</b>, llenando buena parte de la imagen. En cuanto lea
-            sus 9 pegatinas, pasa sola a la siguiente.</li>
-            <li>Las cuatro laterales se piden girando siempre <b>en el mismo sentido</b>, y
-            manteniendo arriba la misma cara.</li>
-            <li>Al final te pide la de <b>arriba</b> y la de <b>abajo</b>, inclinando el cubo.</li>
-            <li>Si una pegatina se resiste por un reflejo, <b>mueve un poco el cubo</b>. Y si esa
-            cara no hay manera, «Ajustar a mano» te deja colocar las 4 esquinas.</li>
+            <li data-i18n-html="capture.guide_faces.1">{{ t("capture.guide_faces.1")|safe }}</li>
+            <li data-i18n-html="capture.guide_faces.2">{{ t("capture.guide_faces.2")|safe }}</li>
+            <li data-i18n-html="capture.guide_faces.3">{{ t("capture.guide_faces.3")|safe }}</li>
+            <li data-i18n-html="capture.guide_faces.4">{{ t("capture.guide_faces.4")|safe }}</li>
           </ol>
         </div>
         <div id="guide-corner" hidden>
-          <h3>¿Qué caras deben verse?</h3>
+          <h3 data-i18n="capture.guide_corner.title">{{ t("capture.guide_corner.title") }}</h3>
           <svg id="capture-guide-svg" viewBox="-60 -60 120 120"></svg>
           <ol class="guide-list">
-            <li><b>Foto 1:</b> una esquina apuntando a la cámara; se ven arriba, delante y derecha.</li>
-            <li><b>Foto 2:</b> dale la vuelta al cubo para que apunte a la cámara la esquina opuesta.</li>
+            <li data-i18n-html="capture.guide_corner.1">{{ t("capture.guide_corner.1")|safe }}</li>
+            <li data-i18n-html="capture.guide_corner.2">{{ t("capture.guide_corner.2")|safe }}</li>
           </ol>
         </div>
-        <p class="hint">Consejo: luz uniforme y sin reflejos fuertes. Cuanto más grande se vea el cubo, mejor lee los colores.</p>
+        <p class="hint" data-i18n="capture.tip">{{ t("capture.tip") }}</p>
       </aside>
     </div>
   </section>
@@ -138,34 +131,32 @@
   <section class="screen" id="screen-review">
     <div class="review-layout">
       <div id="panel-review">
-        <h2>Revisa los colores</h2>
-        <p class="lead">Pulsa una pegatina para cambiar su color. Los centros definen qué color es cada cara.</p>
+        <h2 data-i18n="review.title">{{ t("review.title") }}</h2>
+        <p class="lead" data-i18n="review.lead">{{ t("review.lead") }}</p>
         <div class="palette" id="palette"></div>
         <div class="net" id="net"></div>
         <div class="review-status" id="review-status"></div>
         <div class="review-actions">
-          <button class="btn ghost" id="btn-rotate-view2" hidden>La foto 2 está mal girada: probar otra orientación</button>
-          <button class="btn ghost" id="btn-rescan">Volver a escanear</button>
+          <button class="btn ghost" id="btn-rotate-view2" hidden data-i18n="review.rotate_view2">{{ t("review.rotate_view2") }}</button>
+          <button class="btn ghost" id="btn-rescan" data-i18n="review.rescan">{{ t("review.rescan") }}</button>
         </div>
       </div>
       <aside class="mode-card">
-        <h3>¿Cómo quieres resolverlo?</h3>
+        <h3 data-i18n="mode.title">{{ t("mode.title") }}</h3>
         <label class="mode-option">
           <input type="radio" name="mode" value="learn" checked>
-          <span><b>Aprender (método por capas)</b><br>
-          7 fases, cada una con su propio grafo pequeño. Unos 100-140 giros, agrupados en algoritmos fáciles de recordar.</span>
+          <span data-i18n-html="mode.learn">{{ t("mode.learn")|safe }}</span>
         </label>
         <label class="mode-option">
           <input type="radio" name="mode" value="fast">
-          <span><b>Rápido (Kociemba, dos fases)</b><br>
-          Unos 20-22 giros. Busca en el grafo completo con IDA*.</span>
+          <span data-i18n-html="mode.fast">{{ t("mode.fast")|safe }}</span>
         </label>
         <div class="base-picker" id="base-picker">
-          <span>Color de la primera capa (abajo):</span>
+          <span data-i18n="mode.base">{{ t("mode.base") }}</span>
           <div id="base-colors"></div>
         </div>
-        <button class="btn primary big" id="btn-solve" disabled>Calcular el camino ›</button>
-        <button class="btn ghost small" id="btn-report">Copiar lectura para informar de un fallo</button>
+        <button class="btn primary big" id="btn-solve" disabled data-i18n="review.solve">{{ t("review.solve") }}</button>
+        <button class="btn ghost small" id="btn-report">{{ t("review.report") }}</button>
       </aside>
     </div>
   </section>
@@ -175,11 +166,11 @@
     <div class="solve-layout">
       <div class="solve-left">
         <div class="cube3d-wrap">
-          <div id="cube3d" aria-label="Cubo 3D"></div>
+          <div id="cube3d" data-i18n-attr="aria-label:solve.cube_label" aria-label="{{ t('solve.cube_label') }}"></div>
           <div class="cube3d-tools">
-            <button class="icon-btn" id="btn-replay" title="Repetir la animación">↻</button>
-            <button class="icon-btn" id="btn-reset-view" title="Vista inicial">⌂</button>
-            <label class="speed">Velocidad <input type="range" id="speed" min="0.4" max="2.5" step="0.1" value="1"></label>
+            <button class="icon-btn" id="btn-replay" data-i18n-attr="title:solve.replay_title" title="{{ t('solve.replay_title') }}">↻</button>
+            <button class="icon-btn" id="btn-reset-view" data-i18n-attr="title:solve.reset_title" title="{{ t('solve.reset_title') }}">⌂</button>
+            <label class="speed"><span data-i18n="solve.speed">{{ t("solve.speed") }}</span> <input type="range" id="speed" min="0.4" max="2.5" step="0.1" value="1"></label>
           </div>
         </div>
         <div class="step-card" id="step-card">
@@ -187,12 +178,12 @@
           <div class="step-moves" id="step-moves"></div>
           <p class="step-label" id="step-label"></p>
           <div class="step-actions">
-            <button class="btn ghost" id="btn-prev">‹ Atrás</button>
-            <button class="btn primary big" id="btn-done">Hecho ✓</button>
+            <button class="btn ghost" id="btn-prev" data-i18n="solve.prev">{{ t("solve.prev") }}</button>
+            <button class="btn primary big" id="btn-done">{{ t("solve.done") }}</button>
           </div>
           <p class="step-text" id="step-text"></p>
           <div class="step-extra">
-            <button class="link-btn" id="btn-lost">Me he perdido: volver a escanear el cubo</button>
+            <button class="link-btn" id="btn-lost" data-i18n="solve.lost">{{ t("solve.lost") }}</button>
           </div>
         </div>
         <div class="progress-strip" id="stage-strip"></div>
@@ -200,14 +191,14 @@
       <div class="solve-right">
         <div class="panel" id="panel-sticker">
           <div class="panel-head">
-            <h3>Grafo de pegatinas</h3>
-            <span class="panel-sub">Cada giro mueve los adhesivos por un anillo</span>
+            <h3 data-i18n="panel.sticker.title">{{ t("panel.sticker.title") }}</h3>
+            <span class="panel-sub" data-i18n="panel.sticker.sub">{{ t("panel.sticker.sub") }}</span>
           </div>
           <svg id="sticker-graph" viewBox="-100 -100 200 200"></svg>
         </div>
         <div class="panel" id="panel-neighbors">
           <div class="panel-head">
-            <h3>Vecinos de tu vértice</h3>
+            <h3 data-i18n="panel.neighbors.title">{{ t("panel.neighbors.title") }}</h3>
             <span class="panel-sub" id="neighbors-sub"></span>
           </div>
           <svg id="neighbor-graph" viewBox="-130 -110 260 220"></svg>
@@ -215,36 +206,36 @@
         </div>
         <div class="panel" id="panel-levels">
           <div class="panel-head">
-            <h3 id="levels-title">Capas del grafo de la fase</h3>
+            <h3 id="levels-title">{{ t("panel.levels.title") }}</h3>
             <span class="panel-sub" id="levels-sub"></span>
           </div>
           <svg id="levels-graph" viewBox="0 0 320 170"></svg>
         </div>
         <div class="panel" id="panel-path">
           <div class="panel-head">
-            <h3>Tu camino</h3>
+            <h3 data-i18n="panel.path.title">{{ t("panel.path.title") }}</h3>
             <span class="panel-sub" id="path-sub"></span>
           </div>
           <svg id="path-graph" viewBox="0 0 320 150"></svg>
         </div>
         <div class="panel tutor" id="tutor-panel">
           <div class="panel-head">
-            <h3>Tutor <button class="status-dot checking" id="tutor-dot" type="button" title="Comprobando el LLM…" aria-live="polite"></button></h3>
-            <span class="panel-sub" id="tutor-status">Comprobando el LLM…</span>
+            <h3><span data-i18n="tutor.title">{{ t("tutor.title") }}</span> <button class="status-dot checking" id="tutor-dot" type="button" title="{{ t('tutor.checking') }}" aria-live="polite"></button></h3>
+            <span class="panel-sub" id="tutor-status">{{ t("tutor.checking") }}</span>
           </div>
           <div class="tutor-log" id="tutor-log"></div>
-          <div class="tutor-quick" id="tutor-quick" aria-label="Preguntas rápidas">
-            <button type="button" class="chip" data-quick="notation">¿Qué significa este giro?</button>
-            <button type="button" class="chip" data-quick="why">¿Por qué este giro?</button>
-            <button type="button" class="chip" data-quick="left">¿Cuánto falta?</button>
-            <button type="button" class="chip" data-quick="replay">Repetir el giro</button>
-            <button type="button" class="chip" data-quick="lost">Me he perdido</button>
+          <div class="tutor-quick" id="tutor-quick" data-i18n-attr="aria-label:tutor.quick_label" aria-label="{{ t('tutor.quick_label') }}">
+            <button type="button" class="chip" data-quick="notation" data-i18n="tutor.q.notation">{{ t("tutor.q.notation") }}</button>
+            <button type="button" class="chip" data-quick="why" data-i18n="tutor.q.why">{{ t("tutor.q.why") }}</button>
+            <button type="button" class="chip" data-quick="left" data-i18n="tutor.q.left">{{ t("tutor.q.left") }}</button>
+            <button type="button" class="chip" data-quick="replay" data-i18n="tutor.q.replay">{{ t("tutor.q.replay") }}</button>
+            <button type="button" class="chip" data-quick="lost" data-i18n="tutor.q.lost">{{ t("tutor.q.lost") }}</button>
           </div>
           <form class="tutor-form" id="tutor-form">
-            <input id="tutor-input" placeholder="Pregunta lo que quieras sobre este paso…" autocomplete="off">
-            <button class="btn" type="submit">Enviar</button>
+            <input id="tutor-input" data-i18n-attr="placeholder:tutor.placeholder" placeholder="{{ t('tutor.placeholder') }}" autocomplete="off">
+            <button class="btn" type="submit" data-i18n="tutor.send">{{ t("tutor.send") }}</button>
           </form>
-          <button class="link-btn" id="btn-explain">Explícame este paso con otras palabras</button>
+          <button class="link-btn" id="btn-explain" data-i18n="tutor.explain">{{ t("tutor.explain") }}</button>
         </div>
       </div>
     </div>
@@ -259,10 +250,11 @@
 </main>
 
 <footer>
-  <span>Método por capas + BFS · Kociemba dos fases + IDA*</span>
+  <span data-i18n="footer.methods">{{ t("footer.methods") }}</span>
   {% if site_domain %}<span>{{ site_domain }}</span>{% endif %}
 </footer>
 
+<script type="application/json" id="i18n-data">{{ ui_strings|tojson }}</script>
 <script type="module" src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>

@@ -1,389 +1,136 @@
 // Didactic help for every box: what it shows, how to read it, what to do with it.
 // Each entry is opened by the ⓘ button in the corner of its box.
 
-export const INFO = {
-  cube3d: {
-    title: "El cubo en 3D",
-    html: `
-      <p>Es un gemelo de tu cubo. Siempre muestra el estado en el que <b>debería</b> estar el tuyo
-      justo antes del paso actual, y luego anima el giro que te toca hacer.</p>
-      <h4>Cómo leerlo</h4>
-      <ul>
-        <li>La animación va a la velocidad que marques abajo a la derecha.</li>
-        <li>Si el cubo de la pantalla y el tuyo dejan de coincidir, te has perdido un giro:
-        usa «Me he perdido» para volver a escanear y recalcular el camino.</li>
-      </ul>
-      <h4>Qué puedes hacer</h4>
-      <ul>
-        <li><b>Arrastra</b> con el ratón o el dedo para girar la vista. Esto no mueve el cubo,
-        solo la cámara: es para mirar por detrás.</li>
-        <li><b>Rueda o pellizco</b> para acercar y alejar.</li>
-        <li><b>↻</b> repite la animación del paso. <b>⌂</b> vuelve a la vista inicial.</li>
-      </ul>
-      <p class="hint">Consejo: coloca tu cubo en la misma posición que el de la pantalla, con los
-      mismos colores arriba y de frente, y no lo gires entero durante la resolución.</p>`,
-  },
+import { t, lang } from "./i18n.js";
+import { stageTitle, macroName } from "./names.js";
 
-  step: {
-    title: "La ficha del paso",
-    html: `
-      <p>Cada paso es <b>una arista del grafo</b>: un giro suelto, o un algoritmo entero cuando la
-      fase trabaja con algoritmos. Tú lo haces en tu cubo y lo confirmas.</p>
-      <h4>La notación</h4>
-      <ul>
-        <li><b>R</b>, <b>L</b>, <b>U</b>, <b>D</b>, <b>F</b>, <b>B</b>: caras derecha, izquierda,
-        arriba, abajo, delante y detrás.</li>
-        <li>Sin símbolo: un cuarto de vuelta <b>en sentido horario</b>, mirando esa cara de frente.</li>
-        <li><b>'</b> (prima): un cuarto en sentido antihorario. <b>2</b>: media vuelta.</li>
-      </ul>
-      <h4>Qué puedes hacer</h4>
-      <ul>
-        <li><b>Hecho ✓</b> cuando ya lo has girado en tu cubo. También vale la tecla → o Intro.</li>
-        <li>Si el paso es un <b>algoritmo de varios giros</b>, se avanza <b>giro a giro</b>: arriba verás
-        «giro 2 de 8», el cubo 3D enseña solo ese giro y el botón dice «siguiente giro» hasta el último.
-        Así puedes ir a tu ritmo y memorizarlo.</li>
-        <li><b>‹ Atrás</b> retrocede un giro (tecla ←); desde el primero, vuelve al último giro del paso
-        anterior. Deshaz también el giro en tu cubo.</li>
-        <li>Pulsa <b>un giro concreto</b> de la secuencia para ir a él, y <b>↻</b> para verlo otra vez.</li>
-      </ul>`,
-  },
-
-  sticker: {
-    title: "Grafo de pegatinas",
-    html: `
-      <p>Aquí el cubo se dibuja como un grafo: cada uno de los <b>54 adhesivos es un vértice</b>,
-      y las líneas grises son los caminos por los que los adhesivos se mueven cuando giras una cara.</p>
-      <h4>Cómo leerlo</h4>
-      <ul>
-        <li>Los 9 puntos que forman un grupo son una cara. Las tres caras que ves de frente en tu
-        cubo quedan en el centro, y las tres ocultas se reparten por el borde.</li>
-        <li>Cada giro mueve <b>12 adhesivos por un anillo exterior</b> y rota los <b>8 de la propia
-        cara</b>. En matemáticas, esos anillos son los ciclos de una permutación.</li>
-        <li>Durante la animación se ilumina el anillo del giro y verás a los puntos deslizarse por él
-        tres posiciones (seis si es media vuelta, y al revés si el giro es prima).</li>
-      </ul>
-      <h4>Para qué sirve</h4>
-      <p>Para ver de un vistazo <b>cuánto desordena un giro</b>: toca 20 adhesivos a la vez, y por eso
-      resolver el cubo a base de intuición es tan difícil. Cuando el cubo esté resuelto, cada grupo
-      tendrá los nueve puntos del mismo color.</p>
-      <p class="hint">En el ordenador, al dejar el ratón sobre un punto te dice qué adhesivo es,
-      por ejemplo U6.</p>`,
-  },
-
-  neighbors: {
-    title: "Vecinos de tu vértice",
-    html: `
-      <p>El punto azul del centro eres tú: la posición actual de tu cubo. Cada línea es
-      <b>un movimiento posible</b>, y lleva a un vértice vecino.</p>
-      <h4>Los números</h4>
-      <ul>
-        <li>En el <b>modo aprendizaje</b> es la <b>distancia exacta</b> a la meta de esta fase,
-        calculada de antemano con BFS. El número del centro es a la que estás tú.</li>
-        <li>En el <b>modo rápido</b> es una <b>cota inferior</b>: un número que nunca es mayor que la
-        distancia real. Sirve para descartar caminos sin explorarlos.</li>
-      </ul>
-      <h4>Los colores</h4>
-      <ul>
-        <li><span style="color:var(--good)">Verde</span>: ese movimiento te acerca a la meta.</li>
-        <li>Gris: te deja igual de lejos. <span style="color:var(--bad)">Rojo</span>: te aleja.</li>
-        <li><span style="color:var(--accent)">Azul grueso</span>: la arista que hemos elegido.</li>
-        <li>Línea discontinua (solo en la fase 2 del modo rápido): ese movimiento te sacaría del
-        subgrupo en el que ya estás, así que no se usa.</li>
-      </ul>
-      <h4>Un detalle que sorprende</h4>
-      <p>En el modo rápido, a veces la arista elegida <b>no es la que baja más el número</b>. Es
-      normal: ahí el número es solo una estimación por abajo, y el buscador ya ha explorado el camino
-      completo, así que sabe algo que la estimación no ve.</p>`,
-  },
-
-  levels: {
-    title: "Capas del grafo",
-    html: `
-      <p>Agrupa todos los vértices del grafo de esta fase según <b>su distancia a la meta</b>.
-      La barra 0 es la meta, la barra 1 son las posiciones que se resuelven con un movimiento, y así.</p>
-      <h4>Cómo leerlo</h4>
-      <ul>
-        <li>La altura es <b>cuántos vértices</b> hay a esa distancia, en escala logarítmica: cada
-        marca de la izquierda multiplica por diez.</li>
-        <li>La barra azul marcada con «tú» es dónde estás ahora. Con cada paso te desplazas una
-        barra hacia la izquierda.</li>
-        <li>En el ordenador, al dejar el ratón sobre una barra te dice el número exacto.</li>
-      </ul>
-      <h4>Lo interesante</h4>
-      <p>Casi todos los vértices se acumulan en las barras más altas, y muy pocos están cerca de la
-      meta. Por eso <b>mezclar es fácil y resolver es difícil</b>: si giras al azar, casi seguro que
-      acabas lejos. En el modo rápido, esta gráfica es la base de datos de patrones: un grafo
-      reducido que se recorrió entero con BFS para poder estimar distancias en el grande, que es
-      demasiado enorme para recorrerlo.</p>`,
-  },
-
-  path: {
-    title: "Tu camino",
-    html: `
-      <p>Es el recorrido completo desde tu cubo mezclado hasta el resuelto, paso a paso de izquierda
-      a derecha. El punto azul es dónde estás.</p>
-      <h4>Cómo leerlo</h4>
-      <ul>
-        <li>La altura es <b>lo que te falta</b>. Cuando llega abajo del todo, has terminado.</li>
-        <li>La parte azul es lo recorrido, la gris lo que queda.</li>
-        <li>Las líneas verticales de puntos separan las fases. En el modo aprendizaje verás que la
-        altura <b>sube de golpe</b> al empezar una fase nueva: no es que vayas peor, es que empieza
-        otro grafo distinto y la cuenta se reinicia.</li>
-        <li>En el modo rápido, la línea discontinua es la cota inferior, siempre por debajo de lo
-        que falta de verdad.</li>
-      </ul>`,
-  },
-
-  tutor: {
-    title: "El tutor",
-    html: `
-      <p>Dos formas de preguntar.</p>
-      <h4>Las preguntas rápidas</h4>
-      <p>Los botones de abajo (<b>qué significa este giro</b>, <b>por qué</b>, <b>cuánto falta</b>,
-      repetir y me he perdido) no pasan por ningún modelo: se contestan con los datos del camino
-      calculado, así que <b>siempre son correctas y funcionan aunque el modelo esté caído</b>.</p>
-      <h4>Pregunta libre</h4>
-      <p>Lo que escribas va a un modelo de lenguaje que recibe el contexto del paso en el que estás
-      (la fase, el movimiento, las distancias y los vecinos). Antes de enseñarte su respuesta se
-      comprueba que no te mande hacer un giro que no sea de este paso ni de sus vecinos; si lo hace,
-      en su lugar ves la explicación exacta del paso.</p>
-      <h4>El punto de color</h4>
-      <ul>
-        <li><span style="color:var(--good)">Verde</span>: el modelo responde. Al lado verás cuál es
-        y lo que tardó en contestar a la comprobación.</li>
-        <li><span style="color:var(--bad)">Rojo</span>: no está disponible, y el texto dice por qué.
-        <b>Pulsa el punto</b> para volver a comprobarlo.</li>
-        <li>Gris: no hay ningún modelo configurado en este despliegue.</li>
-      </ul>
-      <h4>Qué preguntarle</h4>
-      <ul>
-        <li>«¿Por qué este giro y no otro?»</li>
-        <li>«¿Qué es el subgrupo H?»</li>
-        <li>«No encuentro la pieza que dices, ¿cómo la reconozco?»</li>
-      </ul>
-      <p class="hint">Ojo: el tutor puede equivocarse. Los movimientos que te da la aplicación están
-      calculados y comprobados; las explicaciones del tutor no. Si algo no cuadra, hazle caso a la
-      ficha del paso.</p>`,
-  },
-
-  capture: {
-    title: "Cómo se lee tu cubo",
-    html: `
-      <p>Con la cámara, el cubo se lee <b>cara a cara</b>: seis pasos, cada uno con una cara de
-      frente. Es mucho más fiable que intentar leer tres caras a la vez desde una esquina, que es
-      como empezó y no funcionaba con cubos reales.</p>
-      <h4>Cómo funciona cada paso</h4>
-      <ul>
-        <li>Enseña la cara <b>de frente</b>, llenando buena parte de la imagen. La aplicación
-        busca las 9 pegatinas, las marca con su color y <b>pasa sola</b> a la siguiente cara.</li>
-        <li>Cada pegatina se da por buena cuando se lee varias veces igual, así que un fotograma
-        movido no cuenta.</li>
-        <li>Si te adelantas y aún no has girado el cubo, te avisa: no guarda dos veces la misma cara.</li>
-        <li>Si una pegatina se resiste (un reflejo encima), mueve un poco el cubo. Pasados unos
-        segundos la lee igualmente del sitio donde la cuadrícula dice que está.</li>
-      </ul>
-      <h4>El orden de las caras</h4>
-      <ul>
-        <li>Primero las cuatro laterales, girando en el mismo sentido y manteniendo arriba la misma
-        cara. Luego arriba y abajo, inclinando el cubo.</li>
-        <li><b>Hay margen:</b> si alguna cara te sale torcida, o giraste el cubo al revés, o
-        enseñaste abajo donde pedía arriba, lo deduce al terminar y te dice qué ha supuesto.</li>
-        <li>Lo que no puede hacer es adivinar un orden cualquiera, y merece la pena saber por qué:
-        seis caras sueltas <b>no dicen cómo estaban pegadas</b>. Con las caras barajadas hay
-        <b>24 cubos legales</b> distintos hechos con tus mismas pegatinas y solo uno es el tuyo;
-        elegir uno sería jugártela a 1 entre 24 y mandarte a girar caras para nada. Lo que sí lo
-        dice es <b>el orden en que las enseñas</b>, y por eso el orden se respeta.</li>
-        <li>Lo que sí importa es <b>no repetir una cara</b>, y de eso se encarga sola: si le enseñas
-        una que ya tiene, te lo dice y no la vuelve a registrar. Para reconocerla no compara los
-        colores tal cual (con otra luz el mismo blanco cambia más de lo que se parecen el blanco y
-        el amarillo), sino <b>qué proporción de rojo, verde y azul</b> tiene cada pegatina, que no
-        cambia al subir o bajar la luz, y prueba los cuatro giros de la cara por si la enseñas
-        torcida. Mira las nueve <b>en promedio</b>, no la que peor encaje: si un reflejo estropea
-        una pegatina, las otras ocho mandan. Si aun así se equivoca, tienes el botón
-        <b>«No, es otra cara: úsala»</b>.</li>
-        <li>Y al terminar hay <b>una última comprobación</b>: seis caras tienen que ser seis caras
-        distintas. Compara los quince pares y, si uno destaca por lo parecido, te pide esa cara otra
-        vez en vez de mandarte a la pantalla siguiente con un cubo imposible.</li>
-      </ul>
-      <h4>Si una cara no hay manera</h4>
-      <p><b>Ajustar a mano</b> congela la imagen y colocas las 4 esquinas de la cara; los círculos
-      te enseñan el color que lee cada pegatina. A los 18 segundos te lleva ahí solo.</p>
-      <p class="hint">Subiendo fotos en vez de usar la cámara, se siguen pidiendo dos fotos con una
-      esquina apuntando a la cámara, con el mismo ajuste manual si hace falta.</p>`,
-  },
-
-  review: {
-    title: "Revisar los colores",
-    html: `
-      <p>El cubo desplegado, como si lo abrieras en una cruz. Arriba la cara de arriba, en el centro
-      la de delante, y la de la derecha del todo es la de detrás.</p>
-      <h4>Cómo corregir</h4>
-      <ul>
-        <li>Elige un color en la paleta y pulsa la pegatina que esté mal.</li>
-        <li>El número de cada color de la paleta cuenta cuántas veces aparece: <b>tienen que ser
-        nueve</b> de cada uno. Si sale en rojo, falta o sobra alguno.</li>
-        <li>Los centros no se pueden mover en un cubo real: son los que definen el color de cada cara.</li>
-      </ul>
-      <h4>Cómo se leen los colores (y por qué casi nunca sale imposible)</h4>
-      <p>No se clasifica cada pegatina por su cuenta. Un cubo no son 54 colores sueltos: son
-      <b>ocho esquinas y doce aristas</b>, y sabemos exactamente cuáles existen, porque los centros
-      dicen los seis colores. Cada esquina es una combinación de {arriba,abajo} × {derecha,izquierda}
-      × {delante,detrás}, y <b>cada pieza está en el cubo una sola vez</b>.</p>
-      <p>Así que la pregunta no es «¿de qué color es esta pegatina?» sino <b>«¿qué pieza hay en esta
-      esquina?»</b>, respondida para las ocho a la vez con un reparto de coste mínimo. Un rojo leído
-      como naranja ya no rompe nada: la pieza que formaría está ocupada, y gana la lectura siguiente
-      más barata. En pruebas, esto pasó de 71% a <b>100% de cubos válidos</b>.</p>
-      <p>Además, cada cara se escanea con <b>su propia luz</b> (la cámara ajusta la exposición al
-      girar el cubo). Eso se estima y se corrige, porque un rojo bajo una luz puede caer más cerca
-      del naranja de otra.</p>
-      <h4>Si dice que el cubo es imposible</h4>
-      <p>Comprobamos que sea un cubo que se puede alcanzar girando caras (piezas sin repetir,
-      orientaciones y paridad correctas). Si el mensaje aparece, casi siempre es un color mal leído,
-      no un cubo roto. El mensaje te dice qué pieza mirar. También puede fallar la orientación de la
-      segunda foto: para eso está el botón que prueba otra.</p>
-      <p class="hint">Las pegatinas con <b>borde discontinuo</b> son las que la estructura del cubo
-      ha tenido que corregir: la cámara decía otra cosa. Suelen estar bien, pero es donde miraría
-      yo primero.</p>`,
-  },
-
-  mode: {
-    title: "¿Qué modo elijo?",
-    html: `
-      <h4>Aprender, por capas</h4>
-      <p>El método clásico de principiante, en 7 fases: cruz de abajo, esquinas de abajo, segunda
-      capa y los cuatro pasos de la última capa. Usa unos 100 a 140 giros, pero <b>los algoritmos se
-      repiten</b> y se acaban memorizando. Cada fase es un grafo pequeño con distancias exactas, así
-      que verás siempre cuánto te falta de verdad.</p>
-      <h4>Rápido, Kociemba en dos fases</h4>
-      <p>Unos 20 o 22 giros, casi el mínimo posible (ningún cubo necesita más de 20). No enseña a
-      resolver, porque los movimientos no siguen un patrón que se pueda recordar, pero es el camino
-      más corto y se ve muy bien cómo funciona una búsqueda con cotas inferiores.</p>
-      <h4>El color de la primera capa</h4>
-      <p>Solo en el modo aprendizaje: elige por qué cara empiezas. Lo habitual es el blanco. La
-      aplicación te dirá cómo sujetar el cubo antes de empezar.</p>`,
-  },
-};
+// Each entry's words are in the language files (info.<key>.title, .html).
+export const INFO = new Proxy({}, {
+  get: (_, key) => ({ title: t(`info.${String(key)}.title`), html: t(`info.${String(key)}.html`) }),
+});
 
 // Technical facts for the tooltip: live numbers about what each box is doing.
 // `ctx` is filled in by app.js with the current plan, step and metadata.
 export function techLines(key, ctx) {
   const { meta, plan, step, stage, mode, tutor } = ctx;
-  const n = (v) => (v === undefined || v === null ? "—" : Number(v).toLocaleString("es"));
+  const n = (v) => (v === undefined || v === null ? "—" : Number(v).toLocaleString(lang()));
+  const L = (k) => t(`tech.l.${k}`);
+  const V = (k, p) => t(`tech.v.${k}`, p);
   switch (key) {
     case "cube3d":
       return [
-        ["Motor", "three.js r169 (WebGL)"],
-        ["Escena", "27 cubies · 54 pegatinas independientes"],
-        ["Animación", "giro de 90° sobre el eje de la cara; al acabar, los cubies vuelven a su sitio y se repinta el estado"],
-        ["Estado", "cadena de 54 letras (caras U R F D L B); cada giro es una permutación de esas 54 posiciones"],
+        [L("engine"), "three.js r169 (WebGL)"],
+        [L("scene"), V("scene")],
+        [L("animation"), V("animation")],
+        [L("state"), V("state")],
       ];
     case "step":
       return [
-        ["Paso", plan ? `${(ctx.index ?? 0) + 1} de ${plan.steps.length}` : "—"],
-        ["Arista", step ? `${step.label} (${step.moves.length} ${step.moves.length === 1 ? "giro" : "giros"})` : "—"],
-        ["Secuencia", step ? step.moves.join(" ") : "—"],
-        ["Distancia", step ? `${step.d_before} → ${step.d_after}` : "—"],
-        ["Total del camino", plan ? `${plan.steps.length} aristas · ${plan.move_count} giros` : "—"],
+        [L("step"), plan ? V("step_of", { k: (ctx.index ?? 0) + 1, n: plan.steps.length }) : "—"],
+        [L("edge"), step ? V("edge", { name: macroName(step), n: step.moves.length }) : "—"],
+        [L("sequence"), step ? step.moves.join(" ") : "—"],
+        [L("distance"), step ? `${step.d_before} → ${step.d_after}` : "—"],
+        [L("path_total"), plan ? V("path_total", { edges: plan.steps.length, moves: plan.move_count }) : "—"],
       ];
     case "sticker":
       return [
-        ["Vértices", "54 (un adhesivo cada uno)"],
-        ["Ciclos por giro", "un anillo de 12 adhesivos (avanza 3) y un ciclo de 8 en la propia cara (avanza 2)"],
-        ["Proyección", "azimutal equivalente en área, centrada en la esquina que apunta a la cámara"],
-        ["Giro actual", step ? step.moves.join(" ") : "—"],
-        ["En términos de grupos", "grafo de Schreier de la acción del grupo del cubo sobre los 54 adhesivos"],
+        [L("vertices"), V("sticker_vertices")],
+        [L("cycles"), V("cycles")],
+        [L("projection"), V("projection")],
+        [L("current_turn"), step ? step.moves.join(" ") : "—"],
+        [L("groups"), V("groups")],
       ];
     case "neighbors":
       if (mode === "learn") {
         return [
-          ["Fase", stage ? stage.title : "—"],
-          ["Aristas por vértice", stage ? n(stage.edges_per_vertex) : "—"],
-          ["Vértices de la fase", stage ? n(stage.vertices) : "—"],
-          ["Números", "distancia exacta a la meta, precalculada con BFS desde la meta recorriendo las aristas al revés"],
-          ["Tu distancia", step ? step.d_before : "—"],
-          ["Aristas que acercan", step ? step.neighbors.filter((x) => x.d < step.d_before).length : "—"],
+          [L("stage"), stage ? stageTitle(stage) : "—"],
+          [L("edges_per_vertex"), stage ? n(stage.edges_per_vertex) : "—"],
+          [L("stage_vertices"), stage ? n(stage.vertices) : "—"],
+          [L("numbers"), V("learn_numbers")],
+          [L("your_distance"), step ? step.d_before : "—"],
+          [L("closer_edges"), step ? step.neighbors.filter((x) => x.d < step.d_before).length : "—"],
         ];
       }
       return [
-        ["Fase", stage ? stage.title : "—"],
-        ["Aristas", step && step.stage === "phase1" ? "18 (todos los giros)" : "10 (solo los de H)"],
-        ["Números", "cota inferior admisible: máximo de dos bases de datos de patrones"],
-        ["Cota actual", step ? step.h_before : "—"],
-        ["Giros que faltan", step ? step.d_before : "—"],
+        [L("stage"), stage ? stageTitle(stage) : "—"],
+        [L("edges"), step && step.stage === "phase1" ? V("edges_p1") : V("edges_p2")],
+        [L("numbers"), V("fast_numbers")],
+        [L("current_bound"), step ? step.h_before : "—"],
+        [L("turns_left"), step ? step.d_before : "—"],
       ];
     case "levels":
       if (mode === "learn") {
         return [
-          ["Grafo", stage ? `${n(stage.vertices)} vértices · ${stage.edges_per_vertex} aristas por vértice` : "—"],
-          ["Distancia máxima", stage ? stage.max_distance : "—"],
-          ["Cálculo", "BFS completo desde la meta; la distancia de cada vértice es exacta"],
-          ["Escala", "logarítmica (cada marca multiplica por diez)"],
-          ["Tu barra", step ? step.d_before : "—"],
+          [L("graph"), stage ? V("stage_graph", { vertices: n(stage.vertices), edges: stage.edges_per_vertex }) : "—"],
+          [L("max_distance"), stage ? stage.max_distance : "—"],
+          [L("computation"), V("bfs_exact")],
+          [L("scale"), V("log_scale")],
+          [L("your_bar"), step ? step.d_before : "—"],
         ];
       }
       return [
-        ["Base de datos", step && step.stage === "phase1"
-          ? `giro de esquinas × aristas centrales: ${n(meta.twophase.sizes.twist_slice)} vértices`
-          : `permutación de esquinas × aristas centrales: ${n(meta.twophase.sizes.corners_slice)} vértices`],
-        ["Cálculo", "BFS completo en el grafo reducido, guardado como tabla"],
-        ["Uso", "cota inferior que nunca supera la distancia real, para podar la búsqueda IDA*"],
-        ["Tu valor", step ? step.h_before : "—"],
+        [L("database"), step && step.stage === "phase1"
+          ? V("db_p1", { n: n(meta.twophase.sizes.twist_slice) })
+          : V("db_p2", { n: n(meta.twophase.sizes.corners_slice) })],
+        [L("computation"), V("db_bfs")],
+        [L("use"), V("db_use")],
+        [L("your_value"), step ? step.h_before : "—"],
       ];
     case "path":
       if (mode === "learn") {
         return [
-          ["Camino", plan ? `${plan.steps.length} aristas · ${plan.move_count} giros` : "—"],
-          ["Fases", plan ? plan.stages.map((s) => s.steps).join(" + ") + " pasos" : "—"],
-          ["Altura", "distancia a la meta de la fase en curso; se reinicia al cambiar de fase"],
-          ["Método", "descenso por la función de distancia: cada arista baja exactamente 1"],
+          [L("path"), plan ? V("path_total", { edges: plan.steps.length, moves: plan.move_count }) : "—"],
+          [L("stages"), plan ? V("stage_steps", { list: plan.stages.map((s) => s.steps).join(" + ") }) : "—"],
+          [L("height"), V("height")],
+          [L("method"), V("descent")],
         ];
       }
       return [
-        ["Camino", plan ? `${plan.move_count} giros` : "—"],
-        ["Fase 1 / Fase 2", plan ? `${plan.search.phase1_length} + ${plan.move_count - plan.search.phase1_length}` : "—"],
-        ["Vértices explorados", plan ? `${n(plan.search.nodes_phase1)} en fase 1 · ${n(plan.search.nodes_phase2)} en fase 2` : "—"],
-        ["Soluciones de fase 1 probadas", plan ? n(plan.search.phase1_solutions_tried) : "—"],
-        ["Tiempo de búsqueda", plan ? `${plan.search.time} s` : "—"],
-        ["Línea discontinua", "cota inferior; la continua son los giros que faltan de verdad"],
+        [L("path"), plan ? V("turns", { n: plan.move_count }) : "—"],
+        [L("phases"), plan ? `${plan.search.phase1_length} + ${plan.move_count - plan.search.phase1_length}` : "—"],
+        [L("explored"), plan ? V("explored", { p1: n(plan.search.nodes_phase1), p2: n(plan.search.nodes_phase2) }) : "—"],
+        [L("p1_tried"), plan ? n(plan.search.phase1_solutions_tried) : "—"],
+        [L("search_time"), plan ? V("seconds", { s: plan.search.time }) : "—"],
+        [L("dashed"), V("dashed")],
       ];
     case "tutor":
       return [
-        ["Modelo", meta.tutor_model || "—"],
-        ["Estado", tutor || "—"],
-        ["Comprobación", "GET /v1/models con 6 s de límite, cacheada 30 s en el servidor"],
-        ["Contexto enviado", "modo, fase, objetivo, movimiento elegido, distancias y los vecinos con su distancia"],
-        ["Preguntas rápidas", "respondidas en el navegador con los datos del plan, sin modelo ni red"],
-        ["Comprobación de respuestas", "se buscan en la respuesta giros en notación (R, U', F2…) y se comparan con los del paso y sus vecinos; uno inventado sustituye la respuesta por la explicación del plan"],
-        ["Aviso", "el modelo puede equivocarse en las explicaciones; los movimientos no salen de él, sino del solver"],
+        [L("model"), meta.tutor_model || "—"],
+        [L("state"), tutor || "—"],
+        [L("check"), V("tutor_check")],
+        [L("context"), V("tutor_context")],
+        [L("quick"), V("tutor_quick")],
+        [L("answer_check"), V("tutor_answer_check")],
+        [L("warning"), V("tutor_warning")],
       ];
     case "capture":
       return [
-        ["Detección", "se segmentan los huecos del marco negro (y, como alternativa, las manchas de color) a tres escalas"],
-        ["Rejilla", "las direcciones de la cuadrícula salen de los propios parches: histograma de ángulos entre vecinos, y cada parche se proyecta a su fila y columna"],
-        ["Resolución", "480 px de ancho para analizar; se prueban 6 segmentaciones por fotograma"],
-        ["Lectura", "cada pegatina se fija cuando 3 lecturas coinciden; si una se resiste 7 s, se lee del punto donde la rejilla dice que está"],
-        ["Caras repetidas", "distancia media entre las 9 pegatinas en Lab, con el tono pesando entero y la luminosidad y la saturación menos (la luz cambia éstas, no el tono); bajo los 4 giros y quitando la peor. Se decide contra la segunda cara más parecida: una repetida está a menos de 0,62 veces la distancia de la siguiente"],
-        ["Colores", "la misma distancia por tono: en fotos del cubo real, un rojo desvaído por la ventana quedaba más cerca de un naranja que de otro rojo con la distancia Lab normal, y no con ésta"],
-        ["Dedos", "una pegatina que no se ve (casi siempre un dedo encima) y se lee de la rejilla cuenta un cuarto: en fotos reales, 11 de 13 muestras de piel quedaban más cerca del rojo"],
-        ["Última comprobación", "al terminar se comparan los 15 pares de caras: una repetida no solo está cerca de su gemela, está 2 veces más cerca que cualquier otro par, y eso no depende de los colores del cubo ni de la luz"],
+        [L("detection"), V("detection")],
+        [L("grid"), V("grid")],
+        [L("resolution"), V("resolution")],
+        [L("reading"), V("reading")],
+        [L("repeats"), V("repeats")],
+        [L("colours"), V("colours")],
+        [L("fingers"), V("fingers")],
+        [L("last_check"), V("last_check")],
       ];
     case "review":
       return [
-        ["Lectura", "no se clasifica pegatina a pegatina, sino pieza a pieza: 8 esquinas y 12 aristas repartidas por coste mínimo (algoritmo húngaro), cada pieza usada una sola vez"],
-        ["Luz de cada cara", "cada cara se escanea con su propia exposición, así que se estima una ganancia por cara alternando con la clasificación (6 vueltas) hasta ponerlas todas bajo la misma luz"],
-        ["Comprobaciones", "9 pegatinas por color, centros distintos, piezas sin repetir"],
-        ["Orientaciones", "suma de giros de esquinas ≡ 0 (mod 3) y de volteos de aristas ≡ 0 (mod 2)"],
-        ["Paridad", "la permutación de esquinas y la de aristas deben tener la misma paridad"],
-        ["Segunda foto", "se prueban las 3 orientaciones posibles y se elige la que da un cubo posible"],
-        ["Cómo lo sujetaste", "4 formas de sujetarlo × 4 giros por cara (4.096 combinaciones), podadas por esquinas y aristas; si encajan dos, se avisa"],
-        ["Reparación", "las tres leyes (giros de esquina múltiplo de 3, volteos de arista múltiplo de 2, paridades iguales) dicen cuál falla, y solo se prueban los cambios que podrían arreglarla, el más barato primero"],
+        [L("reading"), V("review_reading")],
+        [L("light"), V("light")],
+        [L("checks"), V("checks")],
+        [L("orientations"), V("orientations")],
+        [L("parity"), V("parity")],
+        [L("photo2"), V("photo2")],
+        [L("holding"), V("holding")],
+        [L("repair"), V("repair")],
       ];
     case "mode":
       return [
-        ["Aprendizaje", "7 fases; grafos de 24 a 190.080 vértices; BFS desde la meta; unos 100-140 giros"],
-        ["Rápido", `IDA* en G/H (${n(2217093120)} vértices) y luego dentro de H (${n(19508428800)}); 20-22 giros`],
-        ["Grafo completo", "43.252.003.274.489.856.000 posiciones, 18 aristas por vértice, diámetro 20"],
-        ["Cotas", "bases de datos de patrones calculadas con BFS y guardadas en la imagen del contenedor"],
+        [L("learn"), V("mode_learn")],
+        [L("fast"), V("mode_fast", { g: n(2217093120), h: n(19508428800) })],
+        [L("full_graph"), V("full_graph")],
+        [L("bounds"), V("bounds")],
       ];
     default:
       return [];
@@ -410,10 +157,18 @@ export function attachInfoButtons(openInfo) {
     b.className = "info-btn";
     b.type = "button";
     b.textContent = "i";
-    b.title = "Qué es esto y cómo se usa";
-    b.setAttribute("aria-label", `Información sobre: ${INFO[key].title}`);
+    b.title = t("info.button_title");
+    b.setAttribute("aria-label", t("info.button_label", { title: INFO[key].title }));
     b.onclick = () => openInfo(key);
     b.dataset.info = key;
     box.appendChild(b);
   }
+}
+
+// After a change of language.
+export function retitleInfoButtons() {
+  document.querySelectorAll(".info-btn").forEach((b) => {
+    b.title = t("info.button_title");
+    b.setAttribute("aria-label", t("info.button_label", { title: INFO[b.dataset.info].title }));
+  });
 }

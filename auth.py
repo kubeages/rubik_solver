@@ -13,8 +13,10 @@ import logging
 import os
 import time
 
-from flask import jsonify, redirect, render_template, request, session, url_for
+from flask import jsonify, make_response, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash
+
+from cube.i18n import MESSAGES, negotiate, tr
 
 log = logging.getLogger("rubik.auth")
 
@@ -115,6 +117,11 @@ def _record_failure(ip: str):
                 del _failures[k]
 
 
+def _lang() -> str:
+    return negotiate(request.args.get("lang"), request.cookies.get("lang"),
+                     request.headers.get("Accept-Language"))
+
+
 def init(app):
     app.secret_key = secret_key()
     app.config.update(
@@ -134,7 +141,7 @@ def init(app):
         if request.endpoint in open_endpoints or session.get("user"):
             return None
         if request.path.startswith("/api/"):
-            return jsonify({"error": "Sesión caducada: vuelve a entrar"}), 401
+            return jsonify({"error": tr(_lang(), "api.session_expired")}), 401
         return redirect(url_for("login", next=request.full_path.rstrip("?")))
 
     @app.route("/login", methods=["GET", "POST"])
@@ -145,6 +152,7 @@ def init(app):
         if session.get("user"):
             return redirect(target)
         error = None
+        lang = _lang()
         ip = _client()
         wait = _locked_for(ip)
         if request.method == "POST" and not wait:
@@ -157,11 +165,15 @@ def init(app):
                 return redirect(target)
             _record_failure(ip)
             wait = _locked_for(ip)
-            error = "Usuario o contraseña incorrectos."
+            error = tr(lang, "login.wrong")
             log.info("login fallido desde %s", ip)
         if wait:
-            error = f"Demasiados intentos. Espera {wait // 60 + 1} min."
-        return render_template("login.html", error=error, next=target), (401 if error else 200)
+            error = tr(lang, "login.locked", minutes=wait // 60 + 1)
+        page = make_response(render_template("login.html", error=error, next=target, lang=lang,
+                                             t=MESSAGES[lang]), 401 if error else 200)
+        if request.args.get("lang"):      # chosen on this page: remember it for the app too
+            page.set_cookie("lang", lang, max_age=60 * 60 * 24 * 365, samesite="Lax")
+        return page
 
     @app.route("/logout")
     def logout():

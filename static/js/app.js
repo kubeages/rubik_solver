@@ -3,7 +3,9 @@ import { Capture, assemble, assembleDoubtful, classify, VIEW2_COUNT } from "./ca
 import { readPieces } from "./pieces.js";
 import { FaceScan, STEPS } from "./facescan.js";
 import { StickerGraph, drawNeighbors, drawLevels, drawPath, drawCaptureGuide } from "./graphs.js";
-import { INFO, attachInfoButtons, techLines } from "./info.js";
+import { INFO, attachInfoButtons, techLines, retitleInfoButtons } from "./info.js";
+import { t, lang, applyStatic, onLanguageChange, wireSwitch } from "./i18n.js";
+import { stageTitle, stageGoal, stageGraph, macroName } from "./names.js";
 
 const $ = (id) => document.getElementById(id);
 const api = async (url, body) => {
@@ -12,7 +14,7 @@ const api = async (url, body) => {
   });
   if (r.status === 401) {
     window.location.href = "/login?next=" + encodeURIComponent(window.location.pathname);
-    throw new Error("Sesión caducada");
+    throw new Error(t("common.session_expired"));
   }
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.error || `Error ${r.status}`);
@@ -42,7 +44,32 @@ function show(name) {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-function modal(html, actions = [{ label: "Entendido", primary: true }]) {
+// After a change of language: what the page says is re-written by
+// applyStatic(), but what code wrote (the step card, the review message, the
+// graphs, the capture instructions) has to be written again here. Nothing is
+// recomputed: the plan and the colours stay exactly as they were.
+function rewriteInLanguage() {
+  hideTip();
+  retitleInfoButtons();
+  const screen = document.querySelector(".screen.active")?.id;
+  if (screen === "screen-review" && app.colors) {
+    renderPalette();
+    renderNet();
+    renderBasePicker();
+    scheduleValidate();          // the server writes its verdict in the new language
+  }
+  if (screen === "screen-solve" && app.plan) {
+    renderStageStrip();
+    showStep(app.k, app.sub);
+  }
+  if (screen === "screen-capture") {
+    if (app.faceCtl && app.faceCtl.retext) app.faceCtl.retext();
+    if (app.captureCtl && app.captureCtl.retext) app.captureCtl.retext();
+  }
+  if (app.meta) checkTutor(false);
+}
+
+function modal(html, actions = [{ label: t("common.ok"), primary: true }]) {
   return new Promise((resolve) => {
     $("modal-body").innerHTML = html;
     const box = $("modal-actions");
@@ -79,8 +106,8 @@ function techHtml(key) {
 function openInfo(key) {
   const entry = INFO[key];
   if (!entry) return;
-  modal(`<h3>${entry.title}</h3>${entry.html}<h4>Datos técnicos</h4>${techHtml(key)}`,
-    [{ label: "Entendido", primary: true }]);
+  modal(`<h3>${entry.title}</h3>${entry.html}<h4>${t("info.tech_heading")}</h4>${techHtml(key)}`,
+    [{ label: t("common.ok"), primary: true }]);
 }
 
 let tipEl = null;
@@ -95,7 +122,7 @@ function showTip(button, key) {
     document.body.appendChild(tipEl);
   }
   const entry = INFO[key];
-  tipEl.innerHTML = `<b>${entry ? entry.title : ""}</b>${html}<span class="tip-more">Pulsa para la explicación completa</span>`;
+  tipEl.innerHTML = `<b>${entry ? entry.title : ""}</b>${html}<span class="tip-more">${t("info.tip_more")}</span>`;
   tipEl.hidden = false;
   const r = button.getBoundingClientRect();
   const w = Math.min(340, window.innerWidth - 20);
@@ -118,7 +145,7 @@ function repositionTip() {
   if (tipAnchor) showTip(tipAnchor.button, tipAnchor.key);
 }
 
-const colorName = (key) => (COLORS[key] ? COLORS[key].name : "?");
+const colorName = (key) => (COLORS[key] ? t(`color.${key}`) : "?");
 const dot = (key) => `<span style="display:inline-block;width:.85em;height:.85em;border-radius:3px;background:${COLORS[key].hex};border:1px solid #0003;vertical-align:-1px"></span>`;
 
 // ---------------------------------------------------------------------------
@@ -187,8 +214,8 @@ function startCapture(mode) {
   $("guide-faces").hidden = mode !== "camera";
   $("guide-corner").hidden = mode === "camera";
   $("preview-hint").textContent = mode === "camera"
-    ? "Las caras que aún no ha leído salen en gris."
-    : "Las pegatinas que aún no ha leído salen en gris.";
+    ? t("capture.preview_hint_faces")
+    : t("capture.preview_hint_stickers");
   if (mode === "camera") {
     ensureFaceScan();
     app.faceCtl.begin();
@@ -360,9 +387,9 @@ const EDGE_CHECKS = [
 // that is actually in the user's hands.
 const HOLDINGS = [
   { how: null, order: [0, 1, 2, 3, 4, 5] },
-  { how: "girando el cubo al revés", order: [0, 4, 2, 3, 1, 5] },
-  { how: "enseñando abajo donde pedía arriba", order: [3, 1, 2, 0, 4, 5] },
-  { how: "girando al revés y con arriba y abajo cambiados", order: [3, 4, 2, 0, 1, 5] },
+  { how: "holding.reversed", order: [0, 4, 2, 3, 1, 5] },
+  { how: "holding.updown", order: [3, 1, 2, 0, 4, 5] },
+  { how: "holding.both", order: [3, 4, 2, 0, 1, 5] },
 ];
 
 // Returns how the scanned faces go together: `order[position]` is the index,
@@ -497,14 +524,14 @@ function realPieces(centres) {
 function updateFacePreview(faces, step, current) {
   const badge = $("preview-count");
   const done = Object.keys(faces || {}).length;
-  if (badge) badge.textContent = `${done} de 6 caras`;
+  if (badge) badge.textContent = t("capture.faces_count", { n: done });
   const chips = $("face-progress");
   if (chips) {
     const order = STEPS.map((s) => s.face);
     [...chips.children].forEach((chip, i) => {
       chip.hidden = i >= 6;
       const f = order[i];
-      chip.firstChild.textContent = STEPS[i].name.replace("de ", "").replace("la ", "");
+      chip.firstChild.textContent = t(`scan.face.${STEPS[i].face}.short`) + " ";
       const n = faces[f] ? 9 : (i === step && current ? current.filter(Boolean).length : 0);
       chip.querySelector("b").textContent = `${n}/9`;
       chip.classList.toggle("done", n === 9);
@@ -540,7 +567,7 @@ const UNREAD = "#33343a";
 
 function updateCapturePreview({ read, colors, faces }) {
   const badge = $("preview-count");
-  if (badge) badge.textContent = `${read} de 27`;
+  if (badge) badge.textContent = t("capture.stickers_count", { n: read });
   if (faces) {
     for (const chip of $("face-progress").children) {
       const n = faces[chip.dataset.face] || 0;
@@ -582,7 +609,7 @@ function renderPalette() {
     const b = document.createElement("button");
     b.className = "swatch" + (k === activeColor ? " active" : "");
     b.style.background = COLORS[k].hex;
-    b.title = `${colorName(k)} (${counts[k]} de 9)`;
+    b.title = t("review.swatch_title", { color: colorName(k), n: counts[k] });
     b.textContent = counts[k];
     if (counts[k] !== 9) b.style.color = "#c00";
     b.onclick = () => { activeColor = k; renderPalette(); };
@@ -605,9 +632,8 @@ function renderNet() {
       const doubt = app.doubtful && app.doubtful.has(idx);
       const guilty = app.guilty && app.guilty.has(idx);
       b.className = "net-cell" + (i === 4 ? " center" : "") + (doubt ? " doubt" : "") + (guilty ? " bad" : "");
-      if (doubt) b.title += " · leída con dudas, compruébala";
       b.style.background = COLORS[app.colors[idx]] ? COLORS[app.colors[idx]].hex : "#666";
-      b.title = `${f}${i + 1}`;
+      b.title = `${f}${i + 1}` + (doubt ? t("review.doubt_title") : "");
       b.onclick = () => {
         app.colors[idx] = activeColor;
         if (app.doubtful) app.doubtful.delete(idx);
@@ -632,8 +658,7 @@ async function runValidate() {
   $("btn-solve").disabled = true;
   if (new Set(centres).size !== 6) {
     st.className = "review-status err";
-    st.textContent = "Dos caras se han leído con el mismo color en el centro, así que alguna está " +
-      "repetida o mal leída. Corrige los centros abajo o vuelve a escanear.";
+    st.textContent = t("review.same_centres");
     return;
   }
   const facelets = app.model.toFacelets(app.colors);
@@ -642,7 +667,7 @@ async function runValidate() {
     const r = await api("/api/validate", { facelets });
     if (r.ok && r.solved) {
       st.className = "review-status ok";
-      st.textContent = "¡Este cubo ya está resuelto! Mézclalo y vuelve a escanearlo.";
+      st.textContent = t("review.already_solved");
     } else if (r.ok) {
       st.className = "review-status ok";
       const doubts = app.doubtful ? app.doubtful.size : 0;
@@ -651,17 +676,13 @@ async function runValidate() {
         // Said plainly: the camera misread these and the shape of the cube put
         // them right. In tests with fingers over eight stickers the result was
         // perfect every time, so this is a "have a look", not an alarm.
-        st.textContent = `✓ Es un cubo válido. La cámara leyó mal ${overruled === 1 ? "una pegatina" :
-          `${overruled} pegatinas`} (suele ser un dedo o un reflejo) y ${overruled === 1 ? "la he" : "las he"} ` +
-          `corregido con las piezas que tiene que haber en el cubo. ${overruled === 1 ? "Va marcada" : "Van marcadas"} ` +
-          `con borde discontinuo por si quieres echar un vistazo.`;
+        st.textContent = t("review.overruled", { n: overruled });
         $("btn-solve").disabled = false;
         renderBasePicker();
         return;
       }
       if (app.repairedStickers) {
-        st.textContent = "✓ Es un cubo válido, pero he tenido que corregir un par de colores que " +
-          "no encajaban (suele pasar entre rojo y naranja, o blanco y amarillo). Échales un ojo abajo antes de seguir.";
+        st.textContent = t("review.repaired");
         $("btn-solve").disabled = false;
         renderBasePicker();
         return;
@@ -669,19 +690,16 @@ async function runValidate() {
       if (app.orientedFaces || app.rearranged) {
         const parts = [];
         if (app.orientedFaces) {
-          parts.push(app.orientedFaces === 1 ? "una cara estaba girada" : `${app.orientedFaces} caras estaban giradas`);
+          parts.push(t("review.turned", { n: app.orientedFaces }));
         }
-        if (app.rearranged) parts.push(`parece que lo escaneaste ${app.rearranged}`);
-        st.textContent = `✓ Es un cubo válido. Lo he corregido solo: ${parts.join(" y ")}.` +
-          (app.ambiguous ? " Ojo: estas seis caras encajan de más de una manera, así que compruébalo " +
-           "en el dibujo de abajo antes de seguir." : "");
+        if (app.rearranged) parts.push(t("review.rearranged", { how: t(app.rearranged) }));
+        st.textContent = t("review.fixed_itself", { what: parts.join(t("review.and")) }) +
+          (app.ambiguous ? t("review.ambiguous") : "");
         $("btn-solve").disabled = false;
         renderBasePicker();
         return;
       }
-      st.textContent = doubts
-        ? `✓ Es un cubo válido, pero ${doubts} ${doubts === 1 ? "pegatina se leyó" : "pegatinas se leyeron"} con dudas (marcadas con borde discontinuo): compruébalas antes de seguir.`
-        : "✓ Es un cubo válido. Elige el modo y calcula el camino.";
+      st.textContent = doubts ? t("review.doubts", { n: doubts }) : t("review.valid");
       $("btn-solve").disabled = false;
     } else {
       st.className = "review-status err";
@@ -736,15 +754,15 @@ async function solve() {
   const base = "URFDLB"[[0, 1, 2, 3, 4, 5].find((k) => app.colors[9 * k + 4] === app.baseColor)];
   const btn = $("btn-solve");
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> Buscando el camino…';
+  btn.innerHTML = `<span class="spinner"></span> ${t("solve.searching")}`;
   try {
     const plan = await api("/api/solve", { facelets, mode, base });
     startGuide(plan);
   } catch (e) {
-    await modal(`<h3>No se pudo resolver</h3><p>${e.message}</p>`);
+    await modal(`<h3>${t("solve.failed_title")}</h3><p>${e.message}</p>`);
   } finally {
     btn.disabled = false;
-    btn.textContent = "Calcular el camino ›";
+    btn.textContent = t("review.solve");
   }
 }
 
@@ -764,19 +782,18 @@ async function startGuide(plan) {
   renderStageStrip();
 
   const up = app.model.centerColor(start, "U"), front = app.model.centerColor(start, "F");
-  const rotText = plan.rotation.length
-    ? `<p>Gira el cubo entero (sin mover capas) para que quede así:</p>`
-    : `<p>Sujeta el cubo así durante toda la resolución:</p>`;
+  const rotText = `<p>${t(plan.rotation.length ? "solve.hold.rotate" : "solve.hold.keep")}</p>`;
   await modal(`
-    <h3>Antes de empezar: cómo sujetar el cubo</h3>
+    <h3>${t("solve.hold.title")}</h3>
     ${rotText}
-    <p style="font-size:1.1rem">${dot(up)} <b>${colorName(up)}</b> arriba · ${dot(front)} <b>${colorName(front)}</b> mirando hacia ti</p>
-    <p class="hint">La notación: <b>R</b> = gira la cara derecha un cuarto en sentido horario (mirándola de frente),
-    <b>R'</b> = antihorario, <b>R2</b> = media vuelta. Igual con U (arriba), F (delante), L (izquierda), D (abajo) y B (detrás).</p>
-    <p class="hint">Total: ${plan.steps.length} pasos, ${plan.move_count} giros.</p>`,
-    [{ label: "Ya lo tengo así ›", primary: true }]);
+    <p style="font-size:1.1rem">${t("solve.hold.orientation", { upDot: dot(up), up: colorName(up), frontDot: dot(front), front: colorName(front) })}</p>
+    <p class="hint">${t("solve.hold.notation")}</p>
+    <p class="hint">${t("solve.hold.total", { steps: plan.steps.length, moves: plan.move_count })}</p>`,
+    [{ label: t("solve.hold.go"), primary: true }]);
   if (plan.rotation.length && app.cube3d) {
-    await app.cube3d.play(plan.rotation);
+    // no stepping ahead while the cube turns over: showStep(0) would undo it
+    $("btn-done").disabled = $("btn-prev").disabled = true;
+    try { await app.cube3d.play(plan.rotation); } finally { $("btn-done").disabled = false; }
   }
   showStep(0);
 }
@@ -792,7 +809,7 @@ async function ensureViews() {
       app.cube3d.speed = +$("speed").value;
     } catch (e) {
       views3dFailed = true;
-      $("cube3d").innerHTML = `<p class="hint" style="padding:16px">No se pudo cargar la vista 3D (${e.message}). El resto funciona igual.</p>`;
+      $("cube3d").innerHTML = `<p class="hint" style="padding:16px">${t("solve.no3d", { error: e.message })}</p>`;
     }
   }
 }
@@ -821,7 +838,7 @@ function renderStageStrip() {
     seg.style.flexGrow = Math.max(1, b.to - b.from);
     const num = index + 1;                // the stages come in the order they are done
     seg.innerHTML = `<div class="bar"><i></i></div>${num}`;
-    seg.title = b.stage.title;
+    seg.title = stageTitle(b.stage);
     seg.dataset.from = b.from;
     seg.dataset.to = b.to;
     strip.appendChild(seg);
@@ -842,22 +859,16 @@ function explain(step, stage) {
   const nbs = step.neighbors;
   if (mode === "learn") {
     const closer = nbs.filter((n) => n.d < step.d_before).length;
-    const macroNote = step.moves.length > 1
-      ? ` Esta arista es un algoritmo completo (${step.moves.length} giros): para el grafo de esta fase cuenta como un solo paso, porque lo único que mira son sus piezas.`
-      : "";
-    return `Estás en un vértice a distancia ${step.d_before} de la meta de esta fase. ` +
-      `De las ${nbs.length} aristas que salen de él, ${closer} ${closer === 1 ? "baja" : "bajan"} la distancia (en verde). ` +
-      `Tomamos «${step.label}» y quedarás a distancia ${step.d_after}.${macroNote}`;
+    const note = step.moves.length > 1 ? t("explain.macro_note", { n: step.moves.length }) : "";
+    return t("explain.learn", { n: closer, d: step.d_before, edges: nbs.length, name: macroName(step),
+      after: step.d_after, note });
   }
   if (step.stage === "phase1") {
-    return `Fase 1: todavía no estás en el subgrupo H. La cota inferior dice que faltan al menos ${step.h_before} ` +
-      `giros para entrar en H; los números de los vecinos son su propia cota. IDA* no sigue la cota a ciegas: ` +
-      `ya exploró el camino entero (${app.plan.search.nodes_phase1.toLocaleString("es")} vértices en esta fase) ` +
-      `y sabe que este giro lleva a H en ${stage.steps - app.k} pasos.`;
+    return t("explain.phase1", { h: step.h_before, nodes: app.plan.search.nodes_phase1.toLocaleString(lang()),
+      left: stage.steps - app.k });
   }
   const outside = nbs.filter((n) => n.d === null).length;
-  return `Fase 2: ya estás en H. Solo valen las 10 aristas que no te sacan de H (las ${outside} con guion lo harían). ` +
-    `Faltan ${step.d_before} giros; la cota inferior es ${step.h_before}.`;
+  return t("explain.phase2", { outside, d: step.d_before, h: step.h_before });
 }
 
 function showStep(k, sub = 0) {
@@ -872,41 +883,39 @@ function showStep(k, sub = 0) {
   }
   const step = steps[k];
   const stage = stageOf(step);
-  $("step-stage").textContent = stage.title;
+  $("step-stage").textContent = stageTitle(stage);
   $("step-text").textContent = explain(step, stage);
 
   const tokens = $("step-moves");
   tokens.innerHTML = "";
   step.moves.forEach((m, i) => {
-    const t = document.createElement("button");
-    t.className = "move-token";
-    t.textContent = m;
-    t.title = describeMove(m);
-    t.onclick = () => { app.sub = i; showMove(); };
-    tokens.appendChild(t);
+    const tok = document.createElement("button");
+    tok.className = "move-token";
+    tok.textContent = m;
+    tok.title = describeMove(m);
+    tok.onclick = () => { app.sub = i; showMove(); };
+    tokens.appendChild(tok);
   });
 
   // graph panels
   const mode = plan.mode;
-  $("neighbors-sub").textContent = mode === "learn"
-    ? "Cada arista es un movimiento; el número, la distancia a la meta"
-    : "Cada arista es un movimiento; el número, una cota inferior";
+  $("neighbors-sub").textContent = t(mode === "learn" ? "neighbors.sub.learn" : "neighbors.sub.fast");
   drawNeighbors($("neighbor-graph"), step, { mode });
   $("neighbor-legend").innerHTML =
-    `<span><i style="background:var(--good)"></i>más cerca</span><span><i style="background:var(--same)"></i>igual</span>` +
-    `<span><i style="background:var(--bad)"></i>más lejos</span><span><i style="background:var(--accent)"></i>arista elegida</span>`;
+    `<span><i style="background:var(--good)"></i>${t("neighbors.legend.closer")}</span><span><i style="background:var(--same)"></i>${t("neighbors.legend.same")}</span>` +
+    `<span><i style="background:var(--bad)"></i>${t("neighbors.legend.further")}</span><span><i style="background:var(--accent)"></i>${t("neighbors.legend.chosen")}</span>`;
 
   if (mode === "learn") {
-    $("levels-title").textContent = "Capas del grafo de la fase (BFS desde la meta)";
-    $("levels-sub").textContent = "Cuántos vértices hay a cada distancia de la meta";
+    $("levels-title").textContent = t("levels.learn.title");
+    $("levels-sub").textContent = t("levels.learn.sub");
     drawLevels($("levels-graph"), stage.histogram, step.d_before);
   } else {
     const tp = app.meta.twophase;
     const key = step.stage === "phase1" ? "twist_slice" : "corners_slice";
     $("levels-title").textContent = step.stage === "phase1"
-      ? "Base de datos de patrones de la fase 1" : "Base de datos de patrones de la fase 2";
-    $("levels-sub").textContent = "Distancias en un grafo reducido, usadas como cota inferior";
-    drawLevels($("levels-graph"), tp.histograms[key], step.h_before, { label: "cota inferior" });
+      ? t("levels.fast.title1") : t("levels.fast.title2");
+    $("levels-sub").textContent = t("levels.fast.sub");
+    drawLevels($("levels-graph"), tp.histograms[key], step.h_before, { label: t("levels.bound") });
   }
 
   // path chart
@@ -914,12 +923,12 @@ function showStep(k, sub = 0) {
     const series = steps.map((s) => s.d_before).concat([0]);
     const seps = stageBounds().map((b) => b.from).filter((x) => x > 0);
     drawPath($("path-graph"), series, k, { separators: seps });
-    $("path-sub").textContent = "Distancia a la meta de la fase en curso";
+    $("path-sub").textContent = t("path.sub.learn");
   } else {
     const series = steps.map((s) => s.d_before).concat([0]);
     const bounds = steps.map((s) => s.h_before).concat([0]);
     drawPath($("path-graph"), series, k, { bounds, separators: [plan.search.phase1_length] });
-    $("path-sub").textContent = "Giros que faltan (continua) y cota inferior (discontinua)";
+    $("path-sub").textContent = t("path.sub.fast");
   }
   showMove();
 }
@@ -937,13 +946,13 @@ function showMove() {
   const n = step.moves.length;
   const move = step.moves[app.sub];
   $("step-counter").textContent = n > 1
-    ? `Paso ${app.k + 1} de ${steps.length} · giro ${app.sub + 1} de ${n}`
-    : `Paso ${app.k + 1} de ${steps.length}`;
+    ? t("step.counter_turn", { k: app.k + 1, n: steps.length, i: app.sub + 1, m: n })
+    : t("step.counter", { k: app.k + 1, n: steps.length });
   $("step-label").textContent = n > 1
-    ? `${step.label} · ahora ${move}: gira ${describeMove(move)}`
-    : `Gira ${describeMove(move)}`;
+    ? t("step.label_turn", { name: macroName(step), move, how: describeMove(move) })
+    : t("step.label_single", { how: describeMove(move) });
   $("btn-prev").disabled = app.k === 0 && app.sub === 0;
-  $("btn-done").textContent = n > 1 && app.sub < n - 1 ? "Hecho ✓ · siguiente giro" : "Hecho ✓";
+  $("btn-done").textContent = n > 1 && app.sub < n - 1 ? t("step.done_next") : t("solve.done");
   playMove();
 }
 
@@ -985,9 +994,8 @@ function previousMove() {
 }
 
 function describeMove(m) {
-  const names = { U: "la cara de arriba", D: "la cara de abajo", R: "la cara derecha", L: "la cara izquierda", F: "la cara de delante", B: "la cara de detrás" };
-  const how = m.endsWith("2") ? "media vuelta" : m.endsWith("'") ? "un cuarto en sentido antihorario" : "un cuarto en sentido horario";
-  return `${names[m[0]]} ${how}`;
+  const how = t(m.endsWith("2") ? "move.half" : m.endsWith("'") ? "move.anti" : "move.clock");
+  return t("move.describe", { face: t(`move.face.${m[0]}`), how });
 }
 
 async function finish() {
@@ -995,12 +1003,10 @@ async function finish() {
   if (app.cube3d) app.cube3d.jumpTo(app.states[app.states.length - 1]);
   app.graph.jumpTo(app.states[app.states.length - 1]);
   const choice = await modal(`
-    <h3>🎉 ¡Resuelto!</h3>
-    <p>Has recorrido un camino de ${app.plan.steps.length} aristas (${total} giros) hasta el vértice «resuelto».</p>
-    <p class="hint">${app.plan.mode === "learn"
-      ? "Prueba ahora el modo rápido con otro cubo: el mismo grafo, pero buscando un camino de unos 20 giros."
-      : "Ningún cubo necesita más de 20 giros: el diámetro de este grafo es 20."}</p>`,
-    [{ label: "Resolver otro cubo", primary: true }, { label: "Quedarme aquí" }]);
+    <h3>${t("finish.title")}</h3>
+    <p>${t("finish.body", { edges: app.plan.steps.length, moves: total })}</p>
+    <p class="hint">${t(app.plan.mode === "learn" ? "finish.hint.learn" : "finish.hint.fast")}</p>`,
+    [{ label: t("finish.again"), primary: true }, { label: t("finish.stay") }]);
   if (choice === 0) show("home");
 }
 
@@ -1013,14 +1019,14 @@ function tutorContext() {
   if (!step) return { estado: "resuelto" };
   const stage = stageOf(step);
   return {
-    modo: app.plan.mode === "learn" ? "aprendizaje por capas" : "rápido (Kociemba)",
-    fase: stage.title, objetivo_fase: stage.goal, grafo_fase: stage.graph,
+    modo: t(app.plan.mode === "learn" ? "tutor.context_mode.learn" : "tutor.context_mode.fast"),
+    fase: stageTitle(stage), objetivo_fase: stageGoal(stage), grafo_fase: stageGraph(stage),
     paso: `${app.k + 1} de ${app.plan.steps.length}`,
-    arista_elegida: step.label, giros: step.moves.join(" "),
+    arista_elegida: macroName(step), giros: step.moves.join(" "),
     giro_actual: `${step.moves[app.sub || 0]} (${(app.sub || 0) + 1} de ${step.moves.length})`,
     distancia_antes: step.d_before, distancia_despues: step.d_after,
     cota_inferior: step.h_before,
-    vecinos: step.neighbors.map((n) => `${n.short || n.label}:${n.d ?? "sale de H"}`).join(", "),
+    vecinos: step.neighbors.map((n) => `${n.short || n.label}:${n.d ?? t("tutor.context_leaves_h")}`).join(", "),
     // every turn it is fair to mention: this step's and those of the edges
     // leaving it. The server checks the reply against this list.
     giros_posibles: [...new Set([...step.moves,
@@ -1034,13 +1040,13 @@ async function checkTutor(force) {
   const label = $("tutor-status");
   if (!app.meta.tutor) {
     dot.className = "status-dot off";
-    dot.title = "Sin LLM configurado";
-    label.textContent = "Tutor desactivado (sin LLM configurado)";
+    dot.title = t("tutor.off_title");
+    label.textContent = t("tutor.off");
     setTutorControls(false);
     return false;
   }
   dot.className = "status-dot checking";
-  label.textContent = "Comprobando el LLM…";
+  label.textContent = t("tutor.checking");
   try {
     const s = await api("/api/tutor/status" + (force ? "?force=1" : ""));
     const ms = s.latency_ms;
@@ -1048,7 +1054,7 @@ async function checkTutor(force) {
     setTutorStatus(s.ok, s.detail + took);
     return s.ok;
   } catch (e) {
-    setTutorStatus(false, "No se pudo comprobar el LLM");
+    setTutorStatus(false, t("tutor.check_failed"));
     return false;
   }
 }
@@ -1056,9 +1062,9 @@ async function checkTutor(force) {
 function setTutorStatus(ok, detail) {
   const dot = $("tutor-dot");
   dot.className = "status-dot " + (ok ? "ok" : "down");
-  dot.title = (ok ? "El tutor responde" : "El tutor no responde") + ": " + detail + " · pulsa para volver a comprobar";
+  dot.title = t(ok ? "tutor.dot_ok" : "tutor.dot_down") + ": " + detail + t("tutor.dot_retry");
   $("tutor-status").textContent = detail +
-    (ok ? "" : " · pulsa el punto para reintentar · las preguntas rápidas siguen funcionando");
+    (ok ? "" : t("tutor.down_tail"));
   setTutorControls(ok);
 }
 
@@ -1089,28 +1095,28 @@ function tutorSay(role, text, cls = "") {
 function quickAnswer(kind) {
   const plan = app.plan;
   const step = plan && plan.steps[app.k];
-  if (!step) return "¡Ya está resuelto! No queda ningún giro.";
+  if (!step) return t("tutor.solved");
   const stage = stageOf(step);
   if (kind === "notation") {
     const distinct = [...new Set(step.moves)];
     // the same wording as the step card, so the two never disagree
-    const lines = distinct.map((m) => `${m}: gira ${describeMove(m)}, mirando esa cara de frente.`);
+    const lines = distinct.map((m) => t("tutor.notation_line", { move: m, how: describeMove(m) }));
     const intro = step.moves.length > 1
-      ? `Este paso es «${step.label}», un algoritmo de ${step.moves.length} giros: ${step.moves.join(" ")}. Cada letra es un giro de una cara, no una pieza:\n`
-      : "Cada letra es un giro de una cara, no una pieza:\n";
+      ? t("tutor.notation_alg", { name: macroName(step), n: step.moves.length, moves: step.moves.join(" ") }) + "\n"
+      : t("tutor.notation_plain") + "\n";
     return intro + lines.join("\n");
   }
   if (kind === "why") {
-    return `Fase «${stage.title}»: ${stage.goal}\n\n${explain(step, stage)}`;
+    return `${t("tutor.why", { stage: stageTitle(stage), goal: stageGoal(stage) })}\n\n${explain(step, stage)}`;
   }
   if (kind === "left") {
     const total = plan.steps.length;
     const movesLeft = plan.steps.slice(app.k).reduce((n, s) => n + s.moves.length, 0) - (app.sub || 0);
     const bound = stageBounds().find((b) => app.k >= b.from && app.k < b.to);
     const inStage = bound ? bound.to - app.k : 0;
-    return `Vas por el paso ${app.k + 1} de ${total}. Quedan ${total - app.k} pasos, ` +
-      `${movesLeft} ${movesLeft === 1 ? "giro" : "giros"} en total.` +
-      (bound ? ` De la fase «${stage.title}» te ${inStage === 1 ? "queda este paso" : `quedan ${inStage} pasos`}.` : "");
+    return t(movesLeft === 1 ? "tutor.left.one_turn" : "tutor.left",
+      { k: app.k + 1, n: total, steps: total - app.k, moves: movesLeft }) +
+      (bound ? t("tutor.left_stage", { n: inStage, stage: stageTitle(stage) }) : "");
   }
   return "";
 }
@@ -1120,7 +1126,7 @@ function askQuick(kind, label) {
   tutorSay("user", label);
   if (kind === "replay") {
     playMove();
-    tutorSay("assistant", "Repitiendo el giro en el cubo 3D.");
+    tutorSay("assistant", t("tutor.replaying"));
     return;
   }
   const answer = quickAnswer(kind);
@@ -1131,7 +1137,7 @@ function askQuick(kind, label) {
 async function askTutor(question) {
   const add = tutorSay;
   add("user", question);
-  const pending = add("assistant", "Pensando…", "pending");
+  const pending = add("assistant", t("tutor.thinking"), "pending");
   try {
     const r = await api("/api/tutor", { question, context: tutorContext(), history: app.tutorHistory });
     // A reply that tells you to make a turn which is neither in this step nor
@@ -1139,16 +1145,15 @@ async function askTutor(question) {
     // the wrong face. The exact explanation of the step goes in its place.
     let answer = r.answer;
     if (r.invented && r.invented.length) {
-      answer = `El tutor ha mencionado ${r.invented.length === 1 ? "un giro" : "giros"} que no ` +
-        `${r.invented.length === 1 ? "es" : "son"} de este paso (${r.invented.join(", ")}), así que no te ` +
-        `enseño su respuesta. Esto es lo que dice el plan:\n\n${quickAnswer("why")}`;
+      answer = t("tutor.invented", { n: r.invented.length, moves: r.invented.join(", ") }) +
+        `\n\n${quickAnswer("why")}`;
     }
     pending.textContent = answer;
     pending.classList.remove("pending");
     app.tutorHistory.push({ role: "user", content: question }, { role: "assistant", content: answer });
-    setTutorStatus(true, "Conectado · " + (app.meta.tutor_model || "LLM"));
+    setTutorStatus(true, t("tutor.connected", { model: app.meta.tutor_model || "LLM" }));
   } catch (e) {
-    pending.textContent = "El tutor no está disponible ahora mismo. La explicación del paso sigue arriba.";
+    pending.textContent = t("tutor.unavailable");
     checkTutor(true);
   }
 }
@@ -1158,6 +1163,8 @@ async function askTutor(question) {
 // ---------------------------------------------------------------------------
 
 async function boot() {
+  wireSwitch();
+  onLanguageChange(rewriteInLanguage);
   app.meta = await api("/api/meta");
   app.model = new CubeModel(app.meta);
   heroAnimation();
@@ -1191,12 +1198,12 @@ async function boot() {
       const text = JSON.stringify(report);
       try {
         await navigator.clipboard.writeText(text);
-        $("btn-report").textContent = "Copiado · pégalo en el mensaje";
+        $("btn-report").textContent = t("report.copied");
       } catch (err) {
-        await modal(`<h3>Lectura del cubo</h3><p>Copia este texto y pégamelo:</p>` +
+        await modal(t("report.modal") +
           `<textarea readonly style="width:100%;height:9em;font-family:monospace;font-size:.72rem">${text}</textarea>`);
       }
-      setTimeout(() => { $("btn-report").textContent = "Copiar lectura para informar de un fallo"; }, 4000);
+      setTimeout(() => { $("btn-report").textContent = t("review.report"); }, 4000);
     });
   }
 
@@ -1239,9 +1246,9 @@ async function boot() {
     if (app.graph) app.graph.speed = +e.target.value;
   };
   $("btn-lost").onclick = async () => {
-    const c = await modal(`<h3>¿Te has perdido?</h3>
-      <p>No pasa nada: tu cubo sigue siendo un vértice del grafo. Escanéalo tal como está ahora y calcularemos un camino nuevo desde ahí.</p>`,
-      [{ label: "Escanear de nuevo", primary: true }, { label: "Cancelar" }]);
+    const c = await modal(`<h3>${t("lost.title")}</h3>
+      <p>${t("lost.body")}</p>`,
+      [{ label: t("lost.scan"), primary: true }, { label: t("common.cancel") }]);
     if (c === 0) startCapture("camera");
   };
   $("tutor-form").onsubmit = (e) => {
@@ -1254,7 +1261,7 @@ async function boot() {
   document.querySelectorAll("#tutor-quick [data-quick]").forEach((b) => {
     b.onclick = () => askQuick(b.dataset.quick, b.textContent);
   });
-  $("btn-explain").onclick = () => askTutor("Explícame este paso con otras palabras: qué hago con el cubo y qué significa en el grafo.");
+  $("btn-explain").onclick = () => askTutor(t("tutor.explain_question"));
   $("tutor-dot").onclick = () => { if (app.meta.tutor) checkTutor(true); };
   checkTutor(false);
   document.addEventListener("keydown", (e) => {
@@ -1266,5 +1273,5 @@ async function boot() {
 
 boot().catch((e) => {
   document.querySelector("main").insertAdjacentHTML("afterbegin",
-    `<div class="review-status err">No se pudo iniciar la aplicación: ${e.message}</div>`);
+    `<div class="review-status err">${t("boot.failed", { error: e.message })}</div>`);
 });

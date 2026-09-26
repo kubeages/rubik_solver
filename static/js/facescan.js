@@ -6,38 +6,17 @@
 // perspective to undo and no ambiguity about which face is which.
 
 import { FaceReader, matchStored, repeatedPair } from "./face.js";
+import { t } from "./i18n.js";
 
 const NS = "http://www.w3.org/2000/svg";
 
 // The order asks for the four sides first, turning the cube always the same
 // way, and then the top and the bottom. Following it, each face's rows and
 // columns land straight on the cube's own layout.
-export const STEPS = [
-  {
-    face: "F", name: "de delante",
-    how: "Sujeta el cubo de frente a la cámara, sin inclinarlo, y acércalo hasta que la cara llene buena parte de la imagen. Cógelo por arriba y por abajo, o por detrás, con los dedos fuera de la cara que enseñas: un dedo encima de una pegatina se lee como si fuera roja. Esta será la cara de delante.",
-  },
-  {
-    face: "R", name: "de la derecha",
-    how: "Gira el cubo un cuarto de vuelta, de forma que la cara que estaba a la derecha quede ahora de frente. Si te equivocas de sentido no pasa nada: al final se deduce cómo lo sujetaste.",
-  },
-  {
-    face: "B", name: "de detrás",
-    how: "Otro cuarto de vuelta en el mismo sentido: ahora te mira la cara de detrás.",
-  },
-  {
-    face: "L", name: "de la izquierda",
-    how: "Otro cuarto de vuelta más, el último de la vuelta completa: la cara de la izquierda.",
-  },
-  {
-    face: "U", name: "de arriba",
-    how: "Vuelve a la posición del principio (la primera cara mirándote) e inclina el cubo hacia delante, como si asomaras la cara de arriba a la cámara.",
-  },
-  {
-    face: "D", name: "de abajo",
-    how: "Y ahora al revés: inclina el cubo hacia atrás para enseñar la cara de abajo.",
-  },
-];
+// Their names and instructions are in the language files (scan.face.<F>.*).
+export const STEPS = ["F", "R", "B", "L", "U", "D"].map((face) => ({ face }));
+const nameOf = (face) => t(`scan.face.${face}.name`);
+const shortOf = (face) => t(`scan.face.${face}.short`);
 
 const HOLD_FRAMES = 2;      // frames with the nine settled before moving on
 const TURN_PAUSE_MS = 2200; // time to turn the cube before reading the next face
@@ -91,7 +70,7 @@ export class FaceScan {
     this.els.video.style.display = "block";
     this._updateTexts();
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      this.els.hint.textContent = "Este navegador no permite usar la cámara aquí (hace falta HTTPS).";
+      this.els.hint.textContent = t("scan.no_camera_api");
       return;
     }
     try {
@@ -107,7 +86,7 @@ export class FaceScan {
       this.size = [v.videoWidth || 1280, v.videoHeight || 960];
       this._startLoop();
     } catch (err) {
-      this.els.hint.textContent = "No se pudo abrir la cámara: " + (err.message || err);
+      this.els.hint.textContent = t("scan.camera_failed", { error: err.message || err });
     }
   }
 
@@ -183,7 +162,7 @@ export class FaceScan {
   acceptCurrent(forced = false) {
     const colors = this.reader.colors();
     if (colors.some((c) => !c)) {
-      this.els.hint.textContent = "Aún faltan pegatinas por leer en esta cara.";
+      this.els.hint.textContent = t("scan.missing");
       return false;
     }
     if (forced) this._insisted.add(STEPS[this.step].face);
@@ -233,9 +212,7 @@ export class FaceScan {
       this.els.canvas.style.display = "none";
       this.els.video.style.display = "block";
       this._updateTexts();
-      this.els.hint.textContent =
-        `Esta cara y la ${first.name} me han salido iguales, así que una de las dos está mal. ` +
-        `Enséñame otra vez la ${late.name}; si insistes, el botón la da por buena igualmente.`;
+      this.els.hint.textContent = t("scan.twins", { first: shortOf(first.face), late: shortOf(late.face) });
       this.onFrame({ step: this.step, faces: this.faces, current: [] });
       this._pauseThenRead();
       return true;      // true means "stop the frame loop", not "all done"
@@ -249,7 +226,7 @@ export class FaceScan {
   _stored() {
     return STEPS
       .filter((s) => this.faces[s.face])
-      .map((s) => ({ face: s.face, name: s.name.replace(/^de la |^de /, ""), colors: this.faces[s.face] }));
+      .map((s) => ({ face: s.face, colors: this.faces[s.face] }));
   }
 
   // This face is one we already have. Say so, keep reading, and offer the
@@ -261,12 +238,17 @@ export class FaceScan {
     this._startedAt = Date.now();        // the wait does not count against them
     const left = STEPS.filter((s) => !this.faces[s.face]).length;
     // kept until a different face is read, so the warning does not flash past
-    this._repeatMsg = `Esa cara ya la tienes (la ${match.name}) · gira el cubo` +
-      (left > 1 ? `, te faltan ${left}` : "");
+    this._repeatFace = match.face;
+    this._repeatLeft = left;
+    this._repeatMsg = this._repeatText();
     this._showProgress({ read: 0, message: this._repeatMsg });
-    if (this.els.shoot) this.els.shoot.textContent = "No, es otra cara: úsala";
-    this.els.hint.textContent =
-      "Si de verdad es otra cara y me estoy equivocando, pulsa «No, es otra cara: úsala».";
+    if (this.els.shoot) this.els.shoot.textContent = t("scan.not_repeat_btn");
+    this.els.hint.textContent = t("scan.not_repeat_hint");
+  }
+
+  _repeatText() {
+    return t("scan.repeat", { name: shortOf(this._repeatFace) }) +
+      (this._repeatLeft > 1 ? t("scan.repeat_left", { n: this._repeatLeft }) : "");
   }
 
   // A moment to turn the cube before the next face starts being read, or the
@@ -278,7 +260,7 @@ export class FaceScan {
       this.els.quality.className = "quality near";
       this.els.quality.innerHTML =
         `<span class="quality-bar"><i style="width:100%"></i></span>` +
-        `<span class="quality-msg">Gira el cubo a la siguiente cara…</span>`;
+        `<span class="quality-msg">${t("scan.turn_next")}</span>`;
     }
     this._timer = setTimeout(() => this._startLoop(), TURN_PAUSE_MS);
   }
@@ -331,8 +313,8 @@ export class FaceScan {
     this._manualForced = false;
     this._showButtons("manual");
     this.els.hint.textContent = onRequest
-      ? "Arrastra las 4 esquinas hasta las esquinas de la cara. Los círculos muestran el color que lee cada pegatina."
-      : "No consigo leer esta cara solo. Arrastra las 4 esquinas hasta las esquinas de la cara: los círculos muestran el color que lee cada pegatina.";
+      ? t("scan.manual.asked")
+      : t("scan.manual.auto");
     this._sampleManual();
   }
 
@@ -367,10 +349,8 @@ export class FaceScan {
     const already = this._manualForced ? null : matchStored(colors, this._stored());
     if (already) {
       this._manualForced = true;
-      this.els.hint.textContent =
-        `Esa parece la cara ${already.name}, que ya tienes. Gira el cubo a una que falte, ` +
-        `o vuelve a pulsar «Usar esta cara» si de verdad es otra.`;
-      if (this.els.use) this.els.use.textContent = "Es otra cara: úsala ›";
+      this.els.hint.textContent = t("scan.manual.repeat", { name: shortOf(already.face) });
+      if (this.els.use) this.els.use.textContent = t("scan.manual.other_btn");
       return;
     }
     this._manualForced = false;
@@ -441,38 +421,46 @@ export class FaceScan {
     // over a sticker, or the light bouncing off one. The empty circle on the
     // picture shows which.
     if (read < 9 && waiting > 3000 && read >= 6) {
-      tail = " · el círculo vacío está tapado: ¿un dedo o un reflejo? Muévelo un poco";
+      tail = t("scan.covered");
     }
-    if (read < 9 && left < 8) tail = ` (en ${left} s lo ajustamos a mano)`;
+    if (read < 9 && left < 8) tail = t("scan.hand_soon", { s: left });
     // While the face in front of the camera is one we already have, that is
     // the only thing worth saying: the reading underneath is going nowhere.
     const repeated = !!this._repeatMsg;
     box.className = `quality ${repeated ? "near" : read === 9 ? "ok" : read >= 5 ? "near" : "bad"}`;
     box.innerHTML =
       `<span class="quality-bar"><i style="width:${Math.round((read / 9) * 100)}%"></i></span>` +
-      `<span class="quality-msg">${repeated ? `${this._repeatMsg} · leyendo ${read} de 9` : res.message + tail}</span>`;
+      `<span class="quality-msg">${repeated ? this._repeatText() + t("scan.reading", { n: read }) : res.message + tail}</span>`;
+  }
+
+  // After a change of language, while scanning.
+  retext() {
+    if (this.step >= STEPS.length) return;
+    this._updateTexts();
+    this._showButtons(this.manual ? "manual" : "camera");
+    if (this._repeat) this.els.shoot.textContent = t("scan.not_repeat_btn");
   }
 
   _updateTexts() {
     const step = STEPS[this.step];
-    this.els.title.textContent = `Cara ${this.step + 1} de 6 · ${step.name}`;
-    this.els.instructions.textContent = step.how;
-    this.els.hint.textContent = "Se pasa sola a la siguiente cara en cuanto lee las 9 pegatinas.";
+    this.els.title.textContent = t("scan.title", { i: this.step + 1, name: nameOf(step.face) });
+    this.els.instructions.textContent = t(`scan.face.${step.face}.how`);
+    this.els.hint.textContent = t("scan.hint");
     if (this.els.onStep) this.els.onStep(this.step, this.faces);
   }
 
   _showButtons(state) {
     const e = this.els;
     e.shoot.hidden = state !== "camera";
-    e.shoot.textContent = "Dar por buena esta cara";
+    e.shoot.textContent = t("scan.btn.accept");
     if (e.manual) e.manual.hidden = state !== "camera";
     if (e.retake) {
       e.retake.hidden = false;
-      e.retake.textContent = "Repetir esta cara";
+      e.retake.textContent = t("scan.btn.retake");
     }
     if (e.use) {
       e.use.hidden = state !== "manual";
-      e.use.textContent = "Usar esta cara ›";
+      e.use.textContent = t("scan.btn.use");
     }
     if (e.uploadLabel) e.uploadLabel.hidden = true;
     if (e.autoToggle) e.autoToggle.parentElement.hidden = true;

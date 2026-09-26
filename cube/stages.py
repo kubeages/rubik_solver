@@ -52,13 +52,23 @@ class Macro:
     label: str
     alg: str
     short: str = ""
+    # What the browser translates: the label above is Spanish, kept for the
+    # tutor and the logs; `key` and `args` name the same thing in any language
+    # (for example "corner_to_slot" with {"slot": "FR"}).
+    key: str = "move"
+    args: dict = field(default_factory=dict)
     moves: list[str] = field(init=False)
     cube: CubieCube = field(init=False)
 
     def __post_init__(self):
         self.moves = parse_alg(self.alg)
         self.short = self.short or self.label
+        if self.key == "move" and not self.args:
+            self.args = {"move": self.label}
         self.cube = CubieCube.solved().apply(self.moves)
+
+    def names(self) -> dict:
+        return {"label": self.label, "short": self.short, "key": self.key, "args": self.args}
 
 
 @dataclass
@@ -154,7 +164,7 @@ class Stage:
             "key": self.key, "title": self.title, "goal": self.goal_text, "graph": self.graph_text,
             "vertices": int(len(self.codes)), "edges_per_vertex": len(self.macros),
             "max_distance": len(hist) - 1, "histogram": hist,
-            "macros": [{"label": m.label, "short": m.short, "alg": m.alg} for m in self.macros],
+            "macros": [{**m.names(), "alg": m.alg} for m in self.macros],
         }
 
     def solve(self, cube: CubieCube) -> tuple[list[dict], CubieCube]:
@@ -166,11 +176,11 @@ class Stage:
             chosen = None
             for m in self.macros:
                 nd = self.distance(cube.multiply(m.cube))
-                neighbours.append({"label": m.label, "short": m.short, "alg": m.alg, "d": nd})
+                neighbours.append({**m.names(), "alg": m.alg, "d": nd})
                 if chosen is None and nd == d - 1:
                     chosen = m
             steps.append({
-                "stage": self.key, "label": chosen.label, "short": chosen.short, "alg": chosen.alg, "moves": chosen.moves,
+                "stage": self.key, **chosen.names(), "alg": chosen.alg, "moves": chosen.moves,
                 "d_before": d, "d_after": d - 1, "neighbors": neighbours,
             })
             cube = cube.multiply(chosen.cube)
@@ -204,14 +214,17 @@ def _orientation_seeds(kind: str) -> list[CubieCube]:
 def _make_stages() -> list[Stage]:
     single = [Macro(m, m) for m in (f + s for f in FACES for s in ("", "'", "2"))]
     corner_macros = [Macro(u, a) for u, a in U_TURNS] + [
-        Macro(f"Esquina al hueco {SLOT_NAMES[i]}", _from_side("R U R' U'", i), SLOT_SHORT[i]) for i in range(4)
+        Macro(f"Esquina al hueco {SLOT_NAMES[i]}", _from_side("R U R' U'", i), SLOT_SHORT[i],
+              "corner_to_slot", {"slot": SLOT_SHORT[i]}) for i in range(4)
     ]
     middle_macros = [Macro(u, a) for u, a in U_TURNS]
     for i in range(4):
         middle_macros.append(Macro(f"Arista a la derecha (cara {SIDE_NAMES[i]})",
-                                   _from_side("U R U' R' U' F' U F", i), "→" + "FRBL"[i]))
+                                   _from_side("U R U' R' U' F' U F", i), "→" + "FRBL"[i],
+                                   "edge_right", {"side": "FRBL"[i]}))
         middle_macros.append(Macro(f"Arista a la izquierda (cara {SIDE_NAMES[i]})",
-                                   _from_side("U' L' U L U F U' F'", i), "←" + "FRBL"[i]))
+                                   _from_side("U' L' U L U F U' F'", i), "←" + "FRBL"[i],
+                                   "edge_left", {"side": "FRBL"[i]}))
     return [
         Stage(
             "cross", "1 · Cruz de la base",
@@ -236,7 +249,7 @@ def _make_stages() -> list[Stage]:
             "Las cuatro aristas de arriba con el color de arriba mirando hacia arriba.",
             "Vértices: posición y orientación de las aristas de arriba. Aristas: girar arriba o F R U R' U' F'.",
             corners=[], edges=[0, 1, 2, 3],
-            macros=[Macro(u, a) for u, a in U_TURNS] + [Macro("Cruz: F R U R' U' F'", "F R U R' U' F'", "Cruz")],
+            macros=[Macro(u, a) for u, a in U_TURNS] + [Macro("Cruz: F R U R' U' F'", "F R U R' U' F'", "Cruz", "cross_alg")],
             seeds=_orientation_seeds("edges")),
         Stage(
             "co", "5 · Cara de arriba",
@@ -244,7 +257,8 @@ def _make_stages() -> list[Stage]:
             "Vértices: posición y giro de las esquinas de arriba. Aristas: girar arriba, Sune o Antisune.",
             corners=[0, 1, 2, 3], edges=[],
             macros=[Macro(u, a) for u, a in U_TURNS] + [
-                Macro("Sune", "R U R' U R U2 R'"), Macro("Antisune", "R U2 R' U' R U' R'", "Anti")],
+                Macro("Sune", "R U R' U R U2 R'", "Sune", "sune"),
+                Macro("Antisune", "R U2 R' U' R U' R'", "Anti", "antisune")],
             seeds=_orientation_seeds("corners")),
         Stage(
             "cp", "6 · Esquinas de arriba en su sitio",
@@ -253,8 +267,8 @@ def _make_stages() -> list[Stage]:
             "que cicla tres esquinas sin girarlas.",
             corners=[0, 1, 2, 3], edges=[],
             macros=[Macro(u, a) for u, a in U_TURNS] + [
-                Macro("A-perm a", "R' F R' B2 R F' R' B2 R2", "Aa"),
-                Macro("A-perm b", "R2 B2 R F R' B2 R F' R", "Ab")],
+                Macro("A-perm a", "R' F R' B2 R F' R' B2 R2", "Aa", "aperm_a"),
+                Macro("A-perm b", "R2 B2 R F R' B2 R F' R", "Ab", "aperm_b")],
             seeds=_u_perms("auf")),
         Stage(
             "ep", "7 · Aristas de arriba en su sitio",
@@ -263,8 +277,8 @@ def _make_stages() -> list[Stage]:
             "que cicla tres aristas sin tocar las esquinas.",
             corners=[0, 1, 2, 3], edges=[0, 1, 2, 3],
             macros=[Macro(u, a) for u, a in U_TURNS] + [
-                Macro("U-perm a", "R U' R U R U R U' R' U' R2", "Ua"),
-                Macro("U-perm b", "R2 U R U R' U' R' U' R' U R'", "Ub")]),
+                Macro("U-perm a", "R U' R U R U R U' R' U' R2", "Ua", "uperm_a"),
+                Macro("U-perm b", "R2 U R U R' U' R' U' R' U R'", "Ub", "uperm_b")]),
     ]
 
 

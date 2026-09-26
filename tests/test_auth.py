@@ -61,7 +61,7 @@ def test_lockout_after_repeated_failures(secured):
     for _ in range(9):
         secured.post("/login", data={"username": "marta", "password": "mala"})
     r = secured.post("/login", data={"username": "marta", "password": "secreta"})
-    assert r.status_code == 401 and "Demasiados intentos" in r.get_data(as_text=True)
+    assert r.status_code == 401 and "Too many attempts" in r.get_data(as_text=True)
 
 
 def test_without_password_the_app_is_open():
@@ -117,3 +117,20 @@ def test_malformed_entries_are_ignored(monkeypatch):
     assert sorted(auth._accounts()) == ["ana"]
     monkeypatch.undo()
     importlib.reload(auth)
+
+
+def test_login_page_speaks_the_browsers_language(secured):
+    en = secured.get("/login", headers={"Accept-Language": "en-GB,en;q=0.9"}).get_data(as_text=True)
+    es = secured.get("/login", headers={"Accept-Language": "es-ES,es;q=0.9"}).get_data(as_text=True)
+    assert '<html lang="en">' in en and "Sign in" in en and "Contraseña" not in en
+    assert '<html lang="es">' in es and "Contraseña" in es and "Password" not in es
+    # both switches are there, the current one marked
+    assert 'aria-current="true" title="English"' in en and "ESP" in en and "ENG" in en
+
+
+def test_choosing_on_the_login_page_is_remembered(secured):
+    r = secured.get("/login?lang=es", headers={"Accept-Language": "en-US"})
+    assert "Contraseña" in r.get_data(as_text=True)
+    assert "lang=es" in r.headers.get("Set-Cookie", "")
+    again = secured.get("/login", headers={"Accept-Language": "en-US"})   # cookie now sent back
+    assert "Contraseña" in again.get_data(as_text=True)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import threading
@@ -10,6 +11,7 @@ from flask import Flask, jsonify, render_template, request, session
 
 import auth
 from cube import stages, tutor, twophase
+from cube.i18n import LANGS, negotiate, tr
 from cube.model import (CORNER_FACELETS, CORNER_NAMES, EDGE_FACELETS, EDGE_NAMES, FACES, MOVE_PERMS,
                         MOVES, SOLVED, STICKERS, InvalidCube,
                         apply_moves, random_state, ring_cycles, validate)
@@ -35,10 +37,32 @@ def _warm_up():
 threading.Thread(target=_warm_up, daemon=True).start()
 
 
+# The words of the interface, one file per language. The server uses them to
+# draw the page already in the reader's language (no flash of the other one),
+# and hands both to the browser so the switch can change language without a
+# reload.
+_I18N_DIR = os.path.join(os.path.dirname(__file__), "static", "i18n")
+UI_STRINGS = {code: json.load(open(os.path.join(_I18N_DIR, f"{code}.json"), encoding="utf-8"))
+              for code in LANGS}
+
+
+def ui_text(lang: str, key: str) -> str:
+    return UI_STRINGS.get(lang, {}).get(key) or UI_STRINGS["en"].get(key) or key
+
+
+def lang_of() -> str:
+    """The language this request wants: ?lang=, then the cookie the page sets
+    when the user picks one, then the browser's Accept-Language."""
+    return negotiate(request.args.get("lang"), request.cookies.get("lang"),
+                     request.headers.get("Accept-Language"))
+
+
 @app.context_processor
 def inject_globals():
+    lang = lang_of()
     return {"site_domain": SITE_DOMAIN, "auth_enabled": auth.enabled(),
-            "auth_user": session.get("user", "")}
+            "auth_user": session.get("user", ""), "lang": lang, "langs": LANGS,
+            "t": lambda key: ui_text(lang, key), "ui_strings": UI_STRINGS}
 
 
 @app.route("/")
@@ -79,7 +103,7 @@ def api_validate():
     try:
         validate(facelets)
     except InvalidCube as e:
-        return jsonify({"ok": False, "error": str(e), "piece": e.piece})
+        return jsonify({"ok": False, "error": e.message(lang_of()), "code": e.key, "piece": e.piece})
     return jsonify({"ok": True, "solved": facelets == SOLVED})
 
 
@@ -96,13 +120,13 @@ def api_solve():
     try:
         validate(facelets)
     except InvalidCube as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": e.message(lang_of()), "code": e.key}), 400
     if mode == "fast":
         return jsonify(_solve_fast(facelets))
     base = data.get("base") or "D"
     front = data.get("front")
     if base not in FACES or (front and front not in FACES):
-        return jsonify({"error": "Cara base no válida"}), 400
+        return jsonify({"error": tr(lang_of(), "api.bad_base")}), 400
     result = stages.solve_layers(facelets, base, front)
     result["mode"] = "learn"
     return jsonify(result)
@@ -119,7 +143,7 @@ def _solve_fast(facelets: str) -> dict:
         phase = info[k]["phase"]
         steps.append({
             "stage": f"phase{phase}",
-            "label": m,
+            "label": m, "key": "move", "args": {"move": m},
             "alg": m,
             "moves": [m],
             "d_before": info[k]["remaining"],
@@ -127,7 +151,8 @@ def _solve_fast(facelets: str) -> dict:
             "h_before": info[k]["h"],
             "h_after": info[k + 1]["h"] if info[k + 1]["phase"] == phase else 0,
             "neighbors": [
-                {"label": n["move"], "alg": n["move"], "d": n["h"]} for n in info[k]["neighbors"]
+                {"label": n["move"], "key": "move", "args": {"move": n["move"]}, "alg": n["move"], "d": n["h"]}
+                for n in info[k]["neighbors"]
             ],
         })
     assert apply_moves(facelets, moves) == SOLVED
@@ -160,11 +185,11 @@ def api_tutor():
     data = request.get_json(silent=True) or {}
     question = (data.get("question") or "").strip()[:1000]
     if not question:
-        return jsonify({"error": "Pregunta vacía"}), 400
+        return jsonify({"error": tr(lang_of(), "api.empty_question")}), 400
     context = data.get("context") or {}
-    answer = tutor.ask(question, context, data.get("history") or [])
+    answer = tutor.ask(question, context, data.get("history") or [], lang=lang_of())
     if answer is None:
-        return jsonify({"error": "El tutor no está disponible ahora mismo"}), 503
+        return jsonify({"error": tr(lang_of(), "api.tutor_unavailable")}), 503
     allowed = context.get("giros_posibles") if isinstance(context, dict) else None
     invented = tutor.invented_moves(answer, allowed if isinstance(allowed, list) else [])
     return jsonify({"answer": answer, "invented": invented})
@@ -172,7 +197,7 @@ def api_tutor():
 
 @app.route("/api/tutor/status")
 def api_tutor_status():
-    return jsonify(tutor.probe(force=request.args.get("force") == "1"))
+    return jsonify(tutor.describe(tutor.probe(force=request.args.get("force") == "1"), lang_of()))
 
 
 @app.route("/healthz")
